@@ -1,0 +1,1028 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -d "${HOME}/.config/agentic-bootstrap/templates" ]]; then
+  TEMPLATE_DIR="${HOME}/.config/agentic-bootstrap/templates"
+elif [[ -d "${SCRIPT_DIR}/../templates" ]]; then
+  TEMPLATE_DIR="${SCRIPT_DIR}/../templates"
+else
+  echo "Could not locate templates directory." >&2
+  exit 1
+fi
+TARGET_DIR="."
+INIT_ONLY="0"
+FORCE="0"
+NO_SYMLINKS="0"
+PORTABLE_ONLY="0"
+APPLY_INIT="0"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agentic-project-init [path] [--init-only] [--force] [--no-symlinks] [--portable-only] [--apply-init]
+
+What it does:
+  - seeds PROJECT-AGENTIC-INIT.md
+  - creates a canonical AGENTS.md starter
+  - creates CLAUDE.md / GEMINI.md symlinks to AGENTS.md (unless --no-symlinks)
+  - adds .github/copilot-instructions.md
+  - adds docs/agentic-eval-pack.md
+  - by default also creates a cross-tool enforcement layer for Copilot + Claude
+
+Flags:
+  --init-only      only create PROJECT-AGENTIC-INIT.md
+  --force          overwrite files created from templates
+  --no-symlinks    create CLAUDE.md and GEMINI.md as copies instead of symlinks
+  --portable-only  skip the tool-specific enforcement layer and generate only the portable baseline
+  --apply-init     read PROJECT-AGENTIC-INIT.md and compile the generated files into a project-specific harness
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --init-only)
+      INIT_ONLY="1"
+      shift
+      ;;
+    --force)
+      FORCE="1"
+      shift
+      ;;
+    --no-symlinks)
+      NO_SYMLINKS="1"
+      shift
+      ;;
+    --portable-only)
+      PORTABLE_ONLY="1"
+      shift
+      ;;
+    --apply-init)
+      APPLY_INIT="1"
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      TARGET_DIR="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ -e "$TARGET_DIR" && ! -d "$TARGET_DIR" ]]; then
+  echo "Target path exists but is not a directory: $TARGET_DIR" >&2
+  exit 1
+fi
+
+mkdir -p "$TARGET_DIR"
+TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
+PROJECT_NAME="$(basename "$TARGET_DIR")"
+
+json_string() {
+  node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$1"
+}
+
+json_array() {
+  node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' "$@"
+}
+
+json_array_var() {
+  local var_name="$1"
+  eval "local items=(\"\${${var_name}[@]-}\")"
+  json_array "${items[@]}"
+}
+
+require_template() {
+  local template_path="$1"
+  if [[ ! -f "$template_path" ]]; then
+    echo "Missing template: $template_path" >&2
+    exit 1
+  fi
+}
+
+render_template() {
+  local src="$1"
+  local dest="$2"
+
+  require_template "$src"
+  mkdir -p "$(dirname "$dest")"
+
+  if [[ -e "$dest" && "$FORCE" != "1" ]]; then
+    echo "skip: $dest"
+    return 0
+  fi
+
+  sed "s/__PROJECT_NAME__/${PROJECT_NAME//\//\\/}/g" "$src" > "$dest"
+  echo "write: $dest"
+}
+
+write_file() {
+  local dest="$1"
+  mkdir -p "$(dirname "$dest")"
+
+  if [[ -e "$dest" && "$FORCE" != "1" ]]; then
+    echo "skip: $dest"
+    return 1
+  fi
+
+  cat > "$dest"
+  echo "write: $dest"
+  return 0
+}
+
+create_link_or_copy() {
+  local target_name="$1"
+  local dest_path="${TARGET_DIR}/${target_name}"
+
+  if [[ -e "$dest_path" && "$FORCE" != "1" ]]; then
+    echo "skip: $dest_path"
+    return 0
+  fi
+
+  rm -f "$dest_path"
+  if [[ "$NO_SYMLINKS" == "1" ]]; then
+    cp "${TARGET_DIR}/AGENTS.md" "$dest_path"
+    echo "copy: $dest_path"
+  else
+    ln -s "AGENTS.md" "$dest_path"
+    echo "link: $dest_path -> AGENTS.md"
+  fi
+}
+
+create_dir_link_or_copy() {
+  local source_dir="$1"
+  local dest_dir="$2"
+
+  mkdir -p "$(dirname "$dest_dir")"
+
+  if [[ -e "$dest_dir" && "$FORCE" != "1" ]]; then
+    echo "skip: $dest_dir"
+    return 0
+  fi
+
+  rm -rf "$dest_dir"
+  if [[ "$NO_SYMLINKS" == "1" ]]; then
+    cp -R "$source_dir" "$dest_dir"
+    echo "copy: $dest_dir"
+  else
+    local rel_source
+    rel_source="$(python3 - <<'PY' "$source_dir" "$dest_dir"
+import os, sys
+src = os.path.abspath(sys.argv[1])
+dst = os.path.abspath(sys.argv[2])
+print(os.path.relpath(src, os.path.dirname(dst)))
+PY
+)"
+    ln -s "$rel_source" "$dest_dir"
+    echo "link: $dest_dir -> $rel_source"
+  fi
+}
+
+append_unique() {
+  local var_name="$1"
+  local item="$2"
+  eval "local current=(\"\${${var_name}[@]-}\")"
+  for existing in "${current[@]}"; do
+    [[ "$existing" == "$item" ]] && return 0
+  done
+  eval "$var_name+=(\"\$item\")"
+}
+
+package_has_script() {
+  local script_name="$1"
+  local package_json="${TARGET_DIR}/package.json"
+  [[ -f "$package_json" ]] || return 1
+  node -e '
+    const fs = require("node:fs");
+    const file = process.argv[1];
+    const key = process.argv[2];
+    const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
+    process.exit(pkg.scripts && Object.prototype.hasOwnProperty.call(pkg.scripts, key) ? 0 : 1);
+  ' "$package_json" "$script_name"
+}
+
+collect_matching_scripts() {
+  local package_json="${TARGET_DIR}/package.json"
+  [[ -f "$package_json" ]] || return 0
+  node -e '
+    const fs = require("node:fs");
+    const file = process.argv[1];
+    const regex = new RegExp(process.argv[2]);
+    const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
+    const scripts = pkg.scripts || {};
+    for (const key of Object.keys(scripts)) {
+      if (regex.test(key)) console.log(key);
+    }
+  ' "$package_json" "$1"
+}
+
+declare -a protected_exact=(".env" ".env.local")
+declare -a protected_prefixes=("node_modules/" ".git/" ".github/hooks/" ".agentic/tmp/" "coverage/" "test-results/")
+declare -a protected_regexes=("^\\.env\\..+")
+declare -a denied_command_regexes=("^git push( .*)?$" "^rm -rf( .*)?$")
+declare -a stop_commands=()
+declare -a post_edit_commands=()
+declare -a stack_tags=()
+declare -a claude_allow_rules=("Bash(git status)" "Bash(git diff *)" "Bash(git log *)" "Bash(git add *)" "Bash(git commit *)")
+declare -a claude_deny_rules=("Read(./.env)" "Read(./.env.*)" "Bash(git push)" "Bash(git push *)" "Bash(rm -rf *)")
+
+has_vite="0"
+has_next="0"
+has_prisma="0"
+
+if [[ -f "${TARGET_DIR}/package.json" ]]; then
+  if [[ -f "${TARGET_DIR}/vite.config.js" || -f "${TARGET_DIR}/vite.config.mjs" || -f "${TARGET_DIR}/vite.config.ts" ]]; then
+    has_vite="1"
+    append_unique stack_tags "vite"
+    append_unique protected_prefixes "dist/"
+    append_unique protected_prefixes ".vite/"
+  fi
+
+  if [[ -f "${TARGET_DIR}/next.config.js" || -f "${TARGET_DIR}/next.config.mjs" || -f "${TARGET_DIR}/next.config.ts" ]]; then
+    has_next="1"
+    append_unique stack_tags "next"
+    append_unique protected_prefixes ".next/"
+    append_unique protected_prefixes "out/"
+    append_unique protected_prefixes "build/"
+    append_unique protected_prefixes ".vercel/"
+  fi
+
+  if [[ -f "${TARGET_DIR}/prisma/schema.prisma" ]]; then
+    has_prisma="1"
+    append_unique stack_tags "prisma"
+    append_unique protected_regexes "^prisma/.*\\.db(-journal|-wal|-shm)?$"
+    append_unique protected_prefixes "prisma/migrations/"
+  fi
+
+  if package_has_script build; then
+    append_unique stop_commands "npm run build"
+    append_unique claude_allow_rules "Bash(npm run build)"
+  fi
+  if package_has_script lint; then
+    append_unique post_edit_commands "npm run lint"
+    append_unique stop_commands "npm run lint"
+    append_unique claude_allow_rules "Bash(npm run lint)"
+  fi
+  if package_has_script test; then
+    append_unique stop_commands "npm run test"
+    append_unique claude_allow_rules "Bash(npm run test)"
+  fi
+  if package_has_script "test:e2e"; then
+    append_unique stop_commands "npm run test:e2e"
+    append_unique claude_allow_rules "Bash(npm run test:e2e)"
+  fi
+  if package_has_script "test:backend"; then
+    append_unique stop_commands "npm run test:backend"
+    append_unique claude_allow_rules "Bash(npm run test:backend)"
+  fi
+  if package_has_script "test:frontend"; then
+    append_unique stop_commands "npm run test:frontend"
+    append_unique claude_allow_rules "Bash(npm run test:frontend)"
+  fi
+  if package_has_script "check:node"; then
+    append_unique post_edit_commands "npm run check:node"
+    append_unique claude_allow_rules "Bash(npm run check:node)"
+  fi
+  if package_has_script "images:webp"; then
+    append_unique claude_allow_rules "Bash(npm run images:webp)"
+  fi
+
+  while IFS= read -r script_name; do
+    [[ -z "$script_name" ]] && continue
+    append_unique denied_command_regexes "^npm run ${script_name}( .*)?$"
+    append_unique claude_deny_rules "Bash(npm run ${script_name})"
+    append_unique claude_deny_rules "Bash(npm run ${script_name} *)"
+  done < <(collect_matching_scripts '(^deploy(:|$))|(:deploy$)|(^.*deploy.*$)')
+fi
+
+if [[ "$has_prisma" == "1" ]]; then
+  append_unique post_edit_commands "npx prisma validate"
+  append_unique stop_commands "npx prisma validate"
+  append_unique claude_allow_rules "Bash(npx prisma validate)"
+  append_unique claude_deny_rules "Bash(npx prisma migrate deploy)"
+  append_unique claude_deny_rules "Bash(npx prisma migrate deploy *)"
+  append_unique denied_command_regexes "^npx prisma migrate deploy( .*)?$"
+fi
+
+if [[ "$APPLY_INIT" == "1" ]]; then
+  if [[ ! -f "${TARGET_DIR}/PROJECT-AGENTIC-INIT.md" ]]; then
+    echo "Missing PROJECT-AGENTIC-INIT.md for --apply-init in ${TARGET_DIR}" >&2
+    exit 1
+  fi
+else
+  render_template "${TEMPLATE_DIR}/PROJECT-AGENTIC-INIT.md" "${TARGET_DIR}/PROJECT-AGENTIC-INIT.md"
+fi
+
+if [[ "$INIT_ONLY" == "1" ]]; then
+  echo
+  echo "Init template ready:"
+  echo "  ${TARGET_DIR}/PROJECT-AGENTIC-INIT.md"
+  echo
+  echo "Next:"
+  echo "  1. Fill the file briefly"
+  echo "  2. Ask your coding agent to bootstrap the project setup from it"
+  exit 0
+fi
+
+render_template "${TEMPLATE_DIR}/AGENTS.md" "${TARGET_DIR}/AGENTS.md"
+render_template "${TEMPLATE_DIR}/copilot-instructions.md" "${TARGET_DIR}/.github/copilot-instructions.md"
+render_template "${TEMPLATE_DIR}/agentic-eval-pack.md" "${TARGET_DIR}/docs/agentic-eval-pack.md"
+render_template "${TEMPLATE_DIR}/test-harness.sh" "${TARGET_DIR}/test-harness.sh"
+chmod +x "${TARGET_DIR}/test-harness.sh"
+create_link_or_copy "CLAUDE.md"
+create_link_or_copy "GEMINI.md"
+
+if [[ "$PORTABLE_ONLY" != "1" ]]; then
+  write_file "${TARGET_DIR}/.claudeignore" <<EOF
+.env
+.env.local
+.env.*.local
+/node_modules/
+/coverage/
+/test-results/
+/.git/
+/.agentic/tmp/
+EOF
+
+  for prefix in "${protected_prefixes[@]}"; do
+    printf '%s\n' "/${prefix}" >> "${TARGET_DIR}/.claudeignore"
+  done
+  sort -u -o "${TARGET_DIR}/.claudeignore" "${TARGET_DIR}/.claudeignore"
+
+  harness_path="${TARGET_DIR}/.agentic/harness.json"
+  protected_exact_json="$(json_array_var protected_exact)"
+  protected_prefixes_json="$(json_array_var protected_prefixes)"
+  protected_regexes_json="$(json_array_var protected_regexes)"
+  denied_commands_json="$(json_array_var denied_command_regexes)"
+  post_edit_json="$(json_array_var post_edit_commands)"
+  stop_commands_json="$(json_array_var stop_commands)"
+  stack_json="$(json_array_var stack_tags)"
+
+  write_file "$harness_path" <<EOF
+{
+  "projectName": $(json_string "$PROJECT_NAME"),
+  "stackTags": ${stack_json},
+  "protectedExactPaths": ${protected_exact_json},
+  "protectedPrefixes": ${protected_prefixes_json},
+  "protectedRegexes": ${protected_regexes_json},
+  "deniedCommandRegexes": ${denied_commands_json},
+  "postEditCommands": ${post_edit_json},
+  "stopCommands": ${stop_commands_json}
+}
+EOF
+
+  write_file "${TARGET_DIR}/.agentic/hooks/harness-lib.mjs" <<'EOF'
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+export function readStdin() {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on('end', () => resolve(data));
+    process.stdin.on('error', reject);
+  });
+}
+
+export function loadHarnessConfig() {
+  const configPath = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'harness.json');
+  return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+}
+
+export function normalizePath(candidatePath) {
+  if (!candidatePath) return '';
+  const absolute = path.resolve(process.cwd(), candidatePath);
+  const relative = path.relative(process.cwd(), absolute);
+  return relative.split(path.sep).join('/');
+}
+
+export function parseHookInput(payload) {
+  const toolName =
+    payload?.toolName
+    || payload?.tool_name
+    || '';
+
+  const rawArgs =
+    payload?.toolArgs
+    || payload?.tool_input
+    || {};
+
+  let toolArgs = rawArgs;
+  if (typeof rawArgs === 'string') {
+    try {
+      toolArgs = JSON.parse(rawArgs);
+    } catch {
+      toolArgs = { command: rawArgs };
+    }
+  }
+
+  const hookEventName = payload?.hook_event_name || null;
+  const isCopilot = Boolean(payload?.toolName || payload?.toolArgs || payload?.sessionId);
+  const isClaude = Boolean(payload?.tool_input || payload?.session_id || hookEventName);
+
+  return { toolName, toolArgs, hookEventName, isCopilot, isClaude };
+}
+
+export function isProtectedPath(relativePath, config) {
+  if (!relativePath) return null;
+
+  for (const exactPath of config.protectedExactPaths || []) {
+    if (relativePath === exactPath) {
+      return `${relativePath} is protected.`;
+    }
+  }
+
+  for (const prefix of config.protectedPrefixes || []) {
+    if (relativePath === prefix.replace(/\/$/, '') || relativePath.startsWith(prefix)) {
+      return `${relativePath} is inside a protected or generated path (${prefix}).`;
+    }
+  }
+
+  for (const source of config.protectedRegexes || []) {
+    const regex = new RegExp(source);
+    if (regex.test(relativePath)) {
+      return `${relativePath} matches a protected pattern (${source}).`;
+    }
+  }
+
+  return null;
+}
+
+export function isDeniedCommand(command, config) {
+  const normalized = String(command || '').trim();
+  if (!normalized) return null;
+  for (const source of config.deniedCommandRegexes || []) {
+    const regex = new RegExp(source);
+    if (regex.test(normalized)) {
+      return `Command is blocked by policy (${source}).`;
+    }
+  }
+  return null;
+}
+
+export function runCommands(commands) {
+  const results = [];
+  for (const command of commands || []) {
+    const result = spawnSync(command, {
+      shell: true,
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      env: process.env,
+    });
+    results.push({
+      command,
+      status: typeof result.status === 'number' ? result.status : 1,
+      stdout: result.stdout || '',
+      stderr: result.stderr || '',
+      error: result.error ? String(result.error.message || result.error) : '',
+    });
+    if (result.error || result.status !== 0) break;
+  }
+  return results;
+}
+
+export function summarizeFailures(results) {
+  return (results || [])
+    .filter((entry) => entry.status !== 0 || entry.error)
+    .map((entry) => {
+      const details = [entry.stderr.trim(), entry.stdout.trim(), entry.error].filter(Boolean)[0] || 'unknown failure';
+      return `${entry.command}: ${details}`;
+    })
+    .join('\n');
+}
+EOF
+
+  write_file "${TARGET_DIR}/.agentic/hooks/protect-files-copilot.mjs" <<'EOF'
+import { readStdin, loadHarnessConfig, parseHookInput, normalizePath, isProtectedPath, isDeniedCommand } from './harness-lib.mjs';
+
+const raw = await readStdin();
+const payload = raw.trim() ? JSON.parse(raw) : {};
+const config = loadHarnessConfig();
+const { toolName, toolArgs } = parseHookInput(payload);
+
+let reason = null;
+if (/^(edit|create|view)$/i.test(toolName)) {
+  const relativePath = normalizePath(toolArgs?.file_path || toolArgs?.path || '');
+  reason = isProtectedPath(relativePath, config);
+} else if (/^(bash|powershell)$/i.test(toolName)) {
+  reason = isDeniedCommand(toolArgs?.command || '', config);
+}
+
+if (reason) {
+  process.stdout.write(JSON.stringify({
+    permissionDecision: 'deny',
+    permissionDecisionReason: reason,
+  }));
+}
+EOF
+
+  write_file "${TARGET_DIR}/.agentic/hooks/protect-files-claude.mjs" <<'EOF'
+import { readStdin, loadHarnessConfig, parseHookInput, normalizePath, isProtectedPath, isDeniedCommand } from './harness-lib.mjs';
+
+const raw = await readStdin();
+const payload = raw.trim() ? JSON.parse(raw) : {};
+const config = loadHarnessConfig();
+const { toolName, toolArgs, isCopilot } = parseHookInput(payload);
+
+if (isCopilot) {
+  process.exit(0);
+}
+
+let reason = null;
+if (/^(Edit|Write|Read)$/i.test(toolName)) {
+  const relativePath = normalizePath(toolArgs?.file_path || toolArgs?.path || '');
+  reason = isProtectedPath(relativePath, config);
+} else if (/^Bash$/i.test(toolName)) {
+  reason = isDeniedCommand(toolArgs?.command || '', config);
+}
+
+if (reason) {
+  console.error(`Blocked by project policy: ${reason}`);
+  process.exit(2);
+}
+EOF
+
+  write_file "${TARGET_DIR}/.agentic/hooks/post-edit-check-copilot.mjs" <<'EOF'
+import { readStdin, loadHarnessConfig, runCommands, summarizeFailures } from './harness-lib.mjs';
+
+const raw = await readStdin();
+if (raw.trim()) JSON.parse(raw);
+const config = loadHarnessConfig();
+const commands = config.postEditCommands || [];
+
+if (commands.length === 0) process.exit(0);
+
+const results = runCommands(commands);
+const failureSummary = summarizeFailures(results);
+if (failureSummary) {
+  process.stdout.write(JSON.stringify({
+    additionalContext: `Post-edit checks failed:\n${failureSummary}`,
+  }));
+}
+EOF
+
+  write_file "${TARGET_DIR}/.agentic/hooks/post-edit-check-claude.mjs" <<'EOF'
+import { readStdin, loadHarnessConfig, runCommands, summarizeFailures } from './harness-lib.mjs';
+
+const raw = await readStdin();
+const payload = raw.trim() ? JSON.parse(raw) : {};
+if (payload?.toolName || payload?.toolArgs || payload?.sessionId) {
+  process.exit(0);
+}
+const config = loadHarnessConfig();
+const commands = config.postEditCommands || [];
+
+if (commands.length === 0) process.exit(0);
+
+const results = runCommands(commands);
+const failureSummary = summarizeFailures(results);
+if (failureSummary) {
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'PostToolUse',
+      additionalContext: `Post-edit checks failed:\n${failureSummary}`,
+    },
+  }));
+}
+EOF
+
+  write_file "${TARGET_DIR}/.agentic/hooks/stop-verify.mjs" <<'EOF'
+import { loadHarnessConfig, runCommands, summarizeFailures } from './harness-lib.mjs';
+
+const config = loadHarnessConfig();
+const commands = config.stopCommands || [];
+
+if (process.argv.includes('--dry-run')) {
+  process.stdout.write(JSON.stringify({ commands }, null, 2));
+  process.exit(0);
+}
+
+if (commands.length === 0) process.exit(0);
+
+const results = runCommands(commands);
+const failureSummary = summarizeFailures(results);
+if (failureSummary) {
+  process.stdout.write(JSON.stringify({
+    decision: 'block',
+    reason: `Verification failed:\n${failureSummary}`,
+  }));
+}
+EOF
+
+  write_file "${TARGET_DIR}/.agentic/hooks/stop-verify-claude.mjs" <<'EOF'
+import { readStdin, parseHookInput } from './harness-lib.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+const raw = await readStdin();
+const payload = raw.trim() ? JSON.parse(raw) : {};
+const { isCopilot } = parseHookInput(payload);
+
+if (isCopilot) {
+  process.exit(0);
+}
+
+const scriptPath = path.resolve(path.dirname(new URL(import.meta.url).pathname), 'stop-verify.mjs');
+const result = spawnSync('node', [scriptPath], {
+  cwd: process.cwd(),
+  encoding: 'utf8',
+  env: process.env,
+});
+
+if (result.error) {
+  console.error(result.error.message);
+  process.exit(1);
+}
+
+if (result.status !== 0) {
+  console.error(result.stderr || result.stdout || 'Verification hook failed.');
+  process.exit(result.status || 1);
+}
+
+const text = (result.stdout || '').trim();
+if (!text) {
+  process.exit(0);
+}
+
+const output = JSON.parse(text);
+if (output?.decision === 'block') {
+  process.stdout.write(JSON.stringify(output));
+}
+EOF
+
+  write_file "${TARGET_DIR}/.agentic/hooks/stop-verify-copilot.mjs" <<'EOF'
+import { readStdin, parseHookInput } from './harness-lib.mjs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+const raw = await readStdin();
+const payload = raw.trim() ? JSON.parse(raw) : {};
+const { isClaude } = parseHookInput(payload);
+
+if (isClaude) {
+  process.exit(0);
+}
+
+const scriptPath = path.resolve(path.dirname(new URL(import.meta.url).pathname), 'stop-verify.mjs');
+const result = spawnSync('node', [scriptPath], {
+  cwd: process.cwd(),
+  encoding: 'utf8',
+  env: process.env,
+});
+
+if (result.error) {
+  console.error(result.error.message);
+  process.exit(1);
+}
+
+if (result.status !== 0) {
+  console.error(result.stderr || result.stdout || 'Verification hook failed.');
+  process.exit(result.status || 1);
+}
+
+const text = (result.stdout || '').trim();
+if (text) {
+  process.stdout.write(text);
+}
+EOF
+
+  write_file "${TARGET_DIR}/.claude/settings.json" <<EOF
+{
+  "\$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "model": "sonnet",
+  "permissions": {
+    "allow": $(json_array "${claude_allow_rules[@]}"),
+    "deny": $(json_array "${claude_deny_rules[@]}")
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|Read|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ROOT=\"\${CLAUDE_PROJECT_DIR:-\$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\"; node \"\$ROOT/.agentic/hooks/protect-files-claude.mjs\""
+          }
+        ]
+      }
+    ]$( [[ "${#post_edit_commands[@]}" -gt 0 ]] && cat <<'JSON'
+,
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\"; node \"$ROOT/.agentic/hooks/post-edit-check-claude.mjs\""
+          }
+        ]
+      }
+    ]
+JSON
+)$( [[ "${#stop_commands[@]}" -gt 0 ]] && cat <<'JSON'
+,
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\"; node \"$ROOT/.agentic/hooks/stop-verify-claude.mjs\""
+          }
+        ]
+      }
+    ]
+JSON
+)
+  }
+}
+EOF
+
+  write_file "${TARGET_DIR}/.github/hooks/protect-files.json" <<'EOF'
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "command": "node .agentic/hooks/protect-files-copilot.mjs",
+        "cwd": ".",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}
+EOF
+
+  if [[ "${#post_edit_commands[@]}" -gt 0 ]]; then
+    write_file "${TARGET_DIR}/.github/hooks/post-edit-check.json" <<'EOF'
+{
+  "version": 1,
+  "hooks": {
+    "postToolUse": [
+      {
+        "type": "command",
+        "command": "node .agentic/hooks/post-edit-check-copilot.mjs",
+        "cwd": ".",
+        "timeoutSec": 30
+      }
+    ]
+  }
+}
+EOF
+  fi
+
+  if [[ "${#stop_commands[@]}" -gt 0 ]]; then
+    write_file "${TARGET_DIR}/.github/hooks/stop-verify.json" <<'EOF'
+{
+  "version": 1,
+  "hooks": {
+    "agentStop": [
+      {
+        "type": "command",
+        "command": "node .agentic/hooks/stop-verify-copilot.mjs",
+        "cwd": ".",
+        "timeoutSec": 300
+      }
+    ]
+  }
+}
+EOF
+  fi
+
+  protected_apply_to=".env*,**/.env*,node_modules/**,coverage/**,test-results/**"
+  [[ "$has_vite" == "1" ]] && protected_apply_to="${protected_apply_to},dist/**,.vite/**"
+  [[ "$has_next" == "1" ]] && protected_apply_to="${protected_apply_to},.next/**,out/**,build/**,.vercel/**"
+  [[ "$has_prisma" == "1" ]] && protected_apply_to="${protected_apply_to},prisma/migrations/**,prisma/*.db,prisma/*.db-journal,prisma/*.db-wal,prisma/*.db-shm"
+
+  write_file "${TARGET_DIR}/.github/instructions/protected-paths.instructions.md" <<EOF
+---
+applyTo: "${protected_apply_to}"
+---
+
+These files and directories are protected.
+
+- Do not edit secrets or environment files directly.
+- Do not hand-edit generated output.
+- Do not modify local database artifacts.
+- Do not rewrite existing migrations; add new ones instead.
+- If a task appears to require touching these paths, stop and explain the safer alternative.
+EOF
+
+  write_file "${TARGET_DIR}/.github/instructions/contract-surfaces.instructions.md" <<'EOF'
+---
+applyTo: "package.json,README.md,**/vite.config.*,**/next.config.*,scripts/**,src/app/api/**,prisma/schema.prisma,prisma/migrations/**,index.html,script.js,**/*.html"
+---
+
+When working on these files:
+
+- treat them as contract surfaces
+- preserve existing naming and deployment assumptions unless the task explicitly changes them
+- mention any downstream surfaces that also need updating
+- use the smallest credible validation command after changes
+EOF
+
+  write_file "${TARGET_DIR}/.claude/agents/project-fast-worker.md" <<EOF
+---
+name: project-fast-worker
+description: Bounded implementation worker for ${PROJECT_NAME}. Use for small, well-scoped changes after the plan is clear.
+tools: Read, Write, Edit, MultiEdit, Glob, Grep, Bash
+model: haiku
+---
+
+You are a bounded implementation worker for ${PROJECT_NAME}.
+
+Rules:
+
+1. Read only the files directly relevant to the task.
+2. Preserve the current project structure instead of introducing parallel architecture.
+3. Prefer the smallest existing validation command that proves the change.
+4. Never deploy, commit, or push.
+5. Stop and hand back if the task grows into architecture, privacy, migration, or high-risk contract work.
+
+Always read:
+
+- AGENTS.md
+- PROJECT-AGENTIC-INIT.md, if present
+- .agentic/harness.json
+EOF
+
+  write_file "${TARGET_DIR}/.claude/agents/project-reviewer.md" <<EOF
+---
+name: project-reviewer
+description: High-signal review agent for ${PROJECT_NAME}. Use after non-trivial changes to check contract drift, missing validation, and unsafe file touches.
+tools: Read, Glob, Grep
+model: sonnet
+---
+
+You are a high-signal reviewer for ${PROJECT_NAME}.
+
+Focus only on important issues:
+
+1. missed contract surfaces
+2. missing validation
+3. protected-path violations
+4. deployment or migration risk
+5. inconsistencies against AGENTS.md or PROJECT-AGENTIC-INIT.md
+
+Return only concrete risks or an explicit "no high-risk issues found".
+EOF
+
+  write_file "${TARGET_DIR}/.agents/skills/project-verify/SKILL.md" <<'EOF'
+---
+description: Choose and run the smallest useful verification flow for this repository. Use when validating whether a change is ready to commit.
+---
+
+## Current working tree
+
+!`git status --short 2>/dev/null || true`
+
+## Changed files
+
+!`git diff --name-only HEAD 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null`
+
+## Harness config
+
+!`cat .agentic/harness.json`
+
+## Instructions
+
+1. Read `AGENTS.md` and `PROJECT-AGENTIC-INIT.md` if present.
+2. Read `.agentic/harness.json`.
+3. Choose the smallest credible validation commands from `stopCommands`.
+4. Run them.
+5. Report:
+   - commands run
+   - pass/fail
+   - whether the change looks ready to commit
+   - any missing manual checks
+EOF
+
+  write_file "${TARGET_DIR}/.agents/skills/project-deploy/SKILL.md" <<'EOF'
+---
+description: Human-gated deployment checklist for this repository. Use when preparing or reviewing a deployment.
+---
+
+## Deployment contract
+
+Deployment is human-gated.
+
+### Required steps
+
+1. Read `AGENTS.md` and `PROJECT-AGENTIC-INIT.md` if present.
+2. Read `.agentic/harness.json`.
+3. Run the repo's credible verification gate before deployment.
+4. Review deployment scripts and environment assumptions.
+
+### Output
+
+Return:
+
+- verification status
+- deployment preconditions
+- whether explicit human approval is still required
+EOF
+
+  write_file "${TARGET_DIR}/.agents/skills/project-contracts/SKILL.md" <<'EOF'
+---
+description: Checklist for contract-sensitive work in this repository. Use when touching auth, routing, deployment, migrations, external integrations, or other high-risk surfaces.
+---
+
+## Contract workflow
+
+1. Read `AGENTS.md`.
+2. Read `PROJECT-AGENTIC-INIT.md` if present.
+3. Identify high-risk surfaces and guarded paths.
+4. Use `.agentic/harness.json` to confirm stop-gate and protection assumptions.
+5. Report:
+   - affected contracts
+   - likely downstream surfaces
+   - recommended validation
+EOF
+  create_dir_link_or_copy "${TARGET_DIR}/.agents/skills" "${TARGET_DIR}/.claude/skills"
+fi
+
+echo
+echo "Scaffold complete for: ${TARGET_DIR}"
+echo
+echo "Created or updated:"
+echo "  - PROJECT-AGENTIC-INIT.md"
+echo "  - AGENTS.md"
+echo "  - CLAUDE.md"
+echo "  - GEMINI.md"
+echo "  - .github/copilot-instructions.md"
+echo "  - docs/agentic-eval-pack.md"
+echo "  - test-harness.sh"
+
+if [[ "$PORTABLE_ONLY" != "1" ]]; then
+  echo "  - .claudeignore"
+  echo "  - .agentic/harness.json"
+  echo "  - .agentic/hooks/*"
+  echo "  - .claude/settings.json"
+  echo "  - .github/hooks/*"
+  echo "  - .github/instructions/*"
+  echo "  - .claude/agents/*"
+  echo "  - .agents/skills/*"
+  echo "  - .claude/skills (adapter)"
+fi
+
+if [[ "$PORTABLE_ONLY" != "1" ]]; then
+  smoke_result="not-run"
+  if printf '{"toolName":"edit","toolArgs":{"file_path":".env"}}' | node "${TARGET_DIR}/.agentic/hooks/protect-files-copilot.mjs" | grep -q '"permissionDecision":"deny"'; then
+    if printf '{"tool_name":"Edit","tool_input":{"file_path":".env"}}' | node "${TARGET_DIR}/.agentic/hooks/protect-files-claude.mjs" >/dev/null 2>&1; then
+      smoke_result="partial"
+    else
+      smoke_result="ok"
+    fi
+  else
+    smoke_result="failed"
+  fi
+
+  echo
+  echo "Hook smoke test:"
+  case "$smoke_result" in
+    ok)
+      echo "  protect-files blocked .env for both Copilot and Claude formats."
+      ;;
+    partial)
+      echo "  Copilot-format block worked; Claude-format wrapper needs manual check."
+      ;;
+    failed)
+      echo "  WARNING: protect-files smoke test did not confirm a deny result."
+      ;;
+    *)
+      echo "  not run"
+      ;;
+  esac
+fi
+
+echo
+if [[ "$PORTABLE_ONLY" == "1" ]]; then
+  echo "Important:"
+  echo "  This run created only the portable baseline."
+  echo "  No tool-specific technical enforcement layer was generated."
+else
+  echo "Important:"
+  echo "  This run created both the portable baseline and a repo-local Copilot/Claude enforcement layer."
+  echo "  Copilot uses .github/hooks plus instructions; Claude uses .claude/settings.json and the same shared hook policy."
+fi
+echo
+echo "Next:"
+echo "  1. Fill PROJECT-AGENTIC-INIT.md with the project-specific facts"
+echo "  2. Review AGENTS.md and the generated guardrails"
+echo "  3. Run ./test-harness.sh"
+echo "  4. Ask your current coding agent to refine repo-specific details from the init file"
+echo "  5. If the repo uses git, commit after reviewing the generated files"
+
+if [[ "$APPLY_INIT" == "1" ]]; then
+  node "${HOME}/.config/agentic-bootstrap/bin/apply-project-agentic-init.mjs" "${TARGET_DIR}"
+  echo
+  echo "Applied PROJECT-AGENTIC-INIT.md to the generated harness."
+fi
