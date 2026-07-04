@@ -54,6 +54,20 @@ function parseKeyValueFields(section) {
   return result;
 }
 
+function findSection(sections, titles) {
+  for (const title of titles) {
+    if (sections.has(title)) return sections.get(title);
+  }
+  return '';
+}
+
+function getField(fields, keys) {
+  for (const key of keys) {
+    if (fields[key]) return fields[key];
+  }
+  return '';
+}
+
 function parseNestedList(section, label) {
   const lines = section.split('\n');
   const target = `- ${label}:`;
@@ -77,6 +91,14 @@ function parseNestedList(section, label) {
   return items;
 }
 
+function parseNestedListAny(section, labels) {
+  for (const label of labels) {
+    const items = parseNestedList(section, label);
+    if (items.length > 0) return items;
+  }
+  return [];
+}
+
 function extractFencedBlock(section, headingLabel = null) {
   const source = headingLabel
     ? (() => {
@@ -89,11 +111,33 @@ function extractFencedBlock(section, headingLabel = null) {
   return fenceMatch ? fenceMatch[1].trim() : '';
 }
 
+function extractFencedBlockAny(section, headingLabels) {
+  for (const headingLabel of headingLabels) {
+    const block = extractFencedBlock(section, headingLabel);
+    if (block) return block;
+  }
+  return '';
+}
+
 function commandLinesFromBlock(block) {
   return block
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith('#'));
+}
+
+function uniqueItems(items) {
+  return Array.from(new Set((items || []).map((item) => String(item || '').trim()).filter(Boolean)));
+}
+
+function stripWrappingBackticks(value) {
+  return String(value || '').trim().replace(/^`+|`+$/g, '');
+}
+
+function isRepoPathPattern(value) {
+  const normalized = stripWrappingBackticks(value);
+  if (!normalized || normalized.startsWith('~')) return false;
+  return normalized.startsWith('.') || normalized.startsWith('/') || normalized.includes('*') || normalized.endsWith('/');
 }
 
 function parseYesNo(value) {
@@ -132,49 +176,70 @@ function writeFile(relativePath, content) {
 }
 
 const sections = parseSections(initText);
-const overview = parseKeyValueFields(sections.get('Projektüberblick') || '');
-const stack = parseKeyValueFields(sections.get('Tech Stack') || '');
-const guardrailsSection = sections.get('Harte Grenzen / Guardrails') || '';
-const highRisk = parseKeyValueFields(sections.get('High-Risk-Surfaces') || '');
-const architecture = sections.get('Architekturregeln') || '';
-const languageRules = parseKeyValueFields(sections.get('Sprach- und Copy-Regeln') || '');
-const skillsFields = parseKeyValueFields(sections.get('Gewünschte Skills') || '');
-const extraSkills = parseNestedList(sections.get('Gewünschte Skills') || '', 'zusätzliche Wunsch-Skills');
-const outputWish = sections.get('Output-Wunsch') || '';
-const hookWish = parseKeyValueFields(sections.get('Hook-Wunsch') || '');
+const overviewSection = findSection(sections, ['Project Overview', 'Projektüberblick']);
+const stackSection = findSection(sections, ['Tech Stack']);
+const commandsSection = findSection(sections, ['Important Commands', 'Wichtige Commands']);
+const guardrailsSection = findSection(sections, ['Hard Boundaries / Guardrails', 'Harte Grenzen / Guardrails']);
+const highRiskSection = findSection(sections, ['High-Risk Surfaces', 'High-Risk-Surfaces']);
+const architectureSection = findSection(sections, ['Architecture Rules', 'Architekturregeln']);
+const languageSection = findSection(sections, ['Language and Copy Rules', 'Sprach- und Copy-Regeln']);
+const skillsSection = findSection(sections, ['Desired Skills', 'Gewünschte Skills']);
+const hookSection = findSection(sections, ['Hook Preferences', 'Hook-Wunsch']);
 
-const projectName = overview['Projektname'] || path.basename(projectDir);
+const overview = parseKeyValueFields(overviewSection);
+const stack = parseKeyValueFields(stackSection);
+const highRisk = parseKeyValueFields(highRiskSection);
+const languageRules = parseKeyValueFields(languageSection);
+const skillsFields = parseKeyValueFields(skillsSection);
+const extraSkills = parseNestedListAny(skillsSection, ['additional desired skills', 'zusätzliche Wunsch-Skills']);
+const hookWish = parseKeyValueFields(hookSection);
+
+const projectName = getField(overview, ['Project Name', 'Projektname']) || path.basename(projectDir);
 const projectSlug = slugify(projectName);
-const shortDescription = overview['Kurzbeschreibung'] || 'Projektbeschreibung ergänzen';
-const customerContext = overview['Kundentyp / Kontext'] || 'Kundenkontext ergänzen';
-const goals = parseNestedList(sections.get('Projektüberblick') || '', '**Wichtige Ziele des Agent-Setups**')
+const shortDescription = getField(overview, ['Short Description', 'Kurzbeschreibung']) || 'Project description needs updating';
+const customerContext = getField(overview, ['Customer Type / Context', 'Kundentyp / Kontext']) || 'Customer context needs updating';
+const frameworkRuntime = getField(stack, ['Framework / Runtime']) || 'needs to be filled in';
+const frontendBackend = getField(stack, ['Frontend / Backend']) || 'needs to be filled in';
+const databaseOrm = getField(stack, ['Database / ORM', 'Datenbank / ORM']) || 'needs to be filled in';
+const testing = getField(stack, ['Testing']) || 'needs to be filled in';
+const deploymentTarget = getField(stack, ['Deployment Target', 'Deployment-Ziel']) || 'needs to be filled in';
+const defaultLanguage = getField(languageRules, ['Default language', 'Standardsprache']) || 'needs to be filled in';
+const toneCopyDirection = getField(languageRules, ['Tone / Copy direction', 'Ton / Copy-Richtung']) || 'needs to be filled in';
+const i18nSpecifics = getField(languageRules, ['i18n specifics', 'i18n-Besonderheiten']) || 'needs to be filled in';
+const preToolUseProtection = getField(hookWish, ['PreToolUse protection', 'PreToolUse-Schutz']) || 'needs to be filled in';
+const postToolUseChecks = getField(hookWish, ['PostToolUse checks', 'PostToolUse-Checks']) || 'needs to be filled in';
+const stopGateWithBuildTestLint = getField(hookWish, ['Stop gate with build/test/lint', 'Stop-Gate mit Build/Test/Lint']) || 'needs to be filled in';
+const goals = parseNestedListAny(overviewSection, ['**Important goals of the agent setup**', '**Wichtige Ziele des Agent-Setups**'])
   .concat(
-    (overview['Wichtige Ziele des Agent-Setups'] ? [overview['Wichtige Ziele des Agent-Setups']] : [])
+    (getField(overview, ['Important goals of the agent setup', 'Wichtige Ziele des Agent-Setups'])
+      ? [getField(overview, ['Important goals of the agent setup', 'Wichtige Ziele des Agent-Setups'])]
+      : [])
       .filter((value) => value && value !== '-')
   );
 
-const commandBlock = extractFencedBlock(sections.get('Wichtige Commands') || '');
-const postEditBlock = extractFencedBlock(sections.get('Wichtige Commands') || '', 'Günstige Post-Edit-Checks');
-const stopGateBlock = extractFencedBlock(sections.get('Wichtige Commands') || '', 'Harte Stop-Gates');
+const commandBlock = extractFencedBlock(commandsSection);
+const postEditBlock = extractFencedBlockAny(commandsSection, ['Cheap Post-Edit Checks', 'Günstige Post-Edit-Checks']);
+const stopGateBlock = extractFencedBlockAny(commandsSection, ['Hard Stop Gates', 'Harte Stop-Gates']);
 
 const baseCommands = commandLinesFromBlock(commandBlock);
 const postEditCommands = commandLinesFromBlock(postEditBlock);
 const stopCommands = commandLinesFromBlock(stopGateBlock);
 
-const protectedPaths = parseNestedList(guardrailsSection, 'Dateien oder Pfade, die nie automatisch bearbeitet werden sollen');
-const secretRules = parseNestedList(guardrailsSection, 'Secrets / Env-Dateien');
-const deployRules = parseNestedList(guardrailsSection, 'Deploy-/Produktiv-Kommandos, die immer menschlich freigegeben bleiben');
-const dbRules = parseNestedList(guardrailsSection, 'Datenbank-/Migrationsregeln');
+const protectedPaths = parseNestedListAny(guardrailsSection, ['Files or paths that must never be edited automatically', 'Dateien oder Pfade, die nie automatisch bearbeitet werden sollen']);
+const secretRules = parseNestedListAny(guardrailsSection, ['Secrets / environment files', 'Secrets / Env-Dateien']);
+const deployRules = parseNestedListAny(guardrailsSection, ['Deployment / production commands that always require human approval', 'Deploy-/Produktiv-Kommandos, die immer menschlich freigegeben bleiben']);
+const dbRules = parseNestedListAny(guardrailsSection, ['Database / migration rules', 'Datenbank-/Migrationsregeln']);
+const protectedDisplayItems = uniqueItems([...protectedPaths, ...secretRules]);
 
-const architectureExisting = parseNestedList(architecture, 'bestehende Muster, die der Agent respektieren soll');
-const architecturePreferred = parseNestedList(architecture, 'bevorzugte Struktur');
-const architectureAvoid = parseNestedList(architecture, 'Dinge, die der Agent nicht neu einführen soll');
+const architectureExisting = parseNestedListAny(architectureSection, ['existing patterns the agent should respect', 'bestehende Muster, die der Agent respektieren soll']);
+const architecturePreferred = parseNestedListAny(architectureSection, ['preferred structure', 'bevorzugte Struktur']);
+const architectureAvoid = parseNestedListAny(architectureSection, ['things the agent should not introduce', 'Dinge, die der Agent nicht neu einführen soll']);
 
 const desiredSkills = [
-  parseYesNo(skillsFields['Verify-Skill']) === true ? 'verify' : null,
-  parseYesNo(skillsFields['Deploy-Skill']) === true ? 'deploy' : null,
-  parseYesNo(skillsFields['Surface-Skill']) === true ? 'surface' : null,
-  parseYesNo(skillsFields['Contract-Skill']) === true ? 'contracts' : null,
+  parseYesNo(getField(skillsFields, ['Verify Skill', 'Verify-Skill'])) === true ? 'verify' : null,
+  parseYesNo(getField(skillsFields, ['Deploy Skill', 'Deploy-Skill'])) === true ? 'deploy' : null,
+  parseYesNo(getField(skillsFields, ['Surface Skill', 'Surface-Skill'])) === true ? 'surface' : null,
+  parseYesNo(getField(skillsFields, ['Contract Skill', 'Contract-Skill'])) === true ? 'contracts' : null,
   ...extraSkills,
 ].filter(Boolean);
 
@@ -196,7 +261,7 @@ for (const item of [...protectedPaths, ...secretRules]) {
   protectedExactPaths.push(normalized);
 }
 
-if (dbRules.some((line) => /migration/i.test(line))) {
+if (dbRules.some((line) => /\bmigration/i.test(line) && !/\b(no migrations?|no database|keine migration|keine datenbank)\b/i.test(line))) {
   protectedPrefixes.push('prisma/migrations/');
   protectedRegexes.push('^prisma/.*\\.db(-journal|-wal|-shm)?$');
 }
@@ -212,9 +277,9 @@ for (const cmd of deployRules) {
 const harness = {
   projectName,
   stackTags: [
-    stack['Framework / Runtime'],
-    stack['Frontend / Backend'],
-    stack['Datenbank / ORM'],
+    frameworkRuntime,
+    frontendBackend,
+    databaseOrm,
   ].filter(Boolean),
   protectedExactPaths: Array.from(new Set(protectedExactPaths)),
   protectedPrefixes: Array.from(new Set(protectedPrefixes)),
@@ -236,99 +301,99 @@ writeFile(
   'AGENTS.md',
   `# ${projectName} - Agent Contract
 
-Diese Datei ist die **kanonische** Instruktionsdatei für dieses Projekt.
+This file is the **canonical** instruction file for this project.
 
-## Primäre Quellen
+## Primary sources
 
-1. \`AGENTS.md\` ist der laufend gepflegte Shared Contract.
-2. \`PROJECT-AGENTIC-INIT.md\` ist der Bootstrap-Vertrag und muss inhaltlich dazu passen.
-3. \`.github/copilot-instructions.md\` ergänzt Copilot-spezifischen Projektkontext.
-4. \`CLAUDE.md\` und \`GEMINI.md\` bleiben dünne Spiegel dieser Regeln.
+1. \`AGENTS.md\` is the actively maintained shared contract.
+2. \`PROJECT-AGENTIC-INIT.md\` is the bootstrap contract and should stay aligned with it.
+3. \`.github/copilot-instructions.md\` adds Copilot-specific project context.
+4. \`CLAUDE.md\` and \`GEMINI.md\` remain thin mirrors of these rules.
 
-## Projektüberblick
+## Project overview
 
 - **Name:** ${projectName}
-- **Kurzbeschreibung:** ${shortDescription}
-- **Kundentyp / Kontext:** ${customerContext}
-${goals.length ? goals.map((goal) => `- **Ziel:** ${goal}`).join('\n') : ''}
+- **Short description:** ${shortDescription}
+- **Customer type / context:** ${customerContext}
+${goals.length ? goals.map((goal) => `- **Goal:** ${goal}`).join('\n') : ''}
 
 ## Stack
 
-- **Framework / Runtime:** ${stack['Framework / Runtime'] || 'ergänzen'}
-- **Frontend / Backend:** ${stack['Frontend / Backend'] || 'ergänzen'}
-- **Datenbank / ORM:** ${stack['Datenbank / ORM'] || 'ergänzen'}
-- **Testing:** ${stack['Testing'] || 'ergänzen'}
-- **Deployment-Ziel:** ${stack['Deployment-Ziel'] || 'ergänzen'}
+- **Framework / Runtime:** ${frameworkRuntime}
+- **Frontend / Backend:** ${frontendBackend}
+- **Database / ORM:** ${databaseOrm}
+- **Testing:** ${testing}
+- **Deployment target:** ${deploymentTarget}
 
 ## Commands
 
 \`\`\`bash
-${baseCommands.join('\n') || '# in PROJECT-AGENTIC-INIT.md ergänzen'}
+${baseCommands.join('\n') || '# add in PROJECT-AGENTIC-INIT.md'}
 \`\`\`
 
-### Günstige Post-Edit-Checks
+### Cheap post-edit checks
 
 \`\`\`bash
-${postEditCommands.join('\n') || '# keine definiert'}
+${postEditCommands.join('\n') || '# none defined'}
 \`\`\`
 
-### Harte Stop-Gates
+### Hard stop gates
 
 \`\`\`bash
-${stopCommands.join('\n') || '# keine definiert'}
+${stopCommands.join('\n') || '# none defined'}
 \`\`\`
 
 ## Guardrails
 
-### Nicht automatisch bearbeiten
+### Do not edit automatically
 
-${[...protectedPaths, ...secretRules].map((item) => `- ${item}`).join('\n') || '- ergänzen'}
+${protectedDisplayItems.map((item) => `- ${item}`).join('\n') || '- add entries'}
 
-### Menschlich freigegebene Kommandos
+### Human-gated commands
 
-${deployRules.map((item) => `- ${item}`).join('\n') || '- ergänzen'}
+${deployRules.map((item) => `- ${item}`).join('\n') || '- add entries'}
 
-### Datenbank-/Migrationsregeln
+### Database / migration rules
 
-${dbRules.map((item) => `- ${item}`).join('\n') || '- keine besonderen Regeln dokumentiert'}
+${dbRules.map((item) => `- ${item}`).join('\n') || '- no special rules documented'}
 
-## High-Risk-Surfaces
+## High-risk surfaces
 
-${highRiskList.join('\n') || '- ergänzen'}
+${highRiskList.join('\n') || '- add from PROJECT-AGENTIC-INIT.md'}
 
-## Architekturregeln
+## Architecture rules
 
-### Bestehende Muster
-${architectureExisting.map((item) => `- ${item}`).join('\n') || '- ergänzen'}
+### Existing patterns
+${architectureExisting.map((item) => `- ${item}`).join('\n') || '- add entries'}
 
-### Bevorzugte Struktur
-${architecturePreferred.map((item) => `- ${item}`).join('\n') || '- ergänzen'}
+### Preferred structure
+${architecturePreferred.map((item) => `- ${item}`).join('\n') || '- add entries'}
 
-### Nicht neu einführen
-${architectureAvoid.map((item) => `- ${item}`).join('\n') || '- ergänzen'}
+### Do not introduce
+${architectureAvoid.map((item) => `- ${item}`).join('\n') || '- add entries'}
 
-## Sprach- und Copy-Regeln
+## Language and copy rules
 
-- **Standardsprache:** ${languageRules['Standardsprache'] || 'ergänzen'}
-- **Ton / Copy-Richtung:** ${languageRules['Ton / Copy-Richtung'] || 'ergänzen'}
-- **i18n-Besonderheiten:** ${languageRules['i18n-Besonderheiten'] || 'ergänzen'}
+- **Default language:** ${defaultLanguage}
+- **Tone / copy direction:** ${toneCopyDirection}
+- **i18n specifics:** ${i18nSpecifics}
 
-## Hook-Policy
+## Hook policy
 
-- **PreToolUse-Schutz:** ${hookWish['PreToolUse-Schutz'] || 'ergänzen'}
-- **PostToolUse-Checks:** ${hookWish['PostToolUse-Checks'] || 'ergänzen'}
-- **Stop-Gate mit Build/Test/Lint:** ${hookWish['Stop-Gate mit Build/Test/Lint'] || 'ergänzen'}
+- **PreToolUse protection:** ${preToolUseProtection}
+- **PostToolUse checks:** ${postToolUseChecks}
+- **Stop gate with build/test/lint:** ${stopGateWithBuildTestLint}
 
-## Tool-Kompatibilität
+## Tool compatibility
 
-- \`.github/hooks/*.json\` + \`.github/instructions/**/*.instructions.md\` sind die Copilot-spezifische Enforcement-Ebene.
-- \`.claude/settings.json\` und \`.claude/agents/\` sind die Claude-spezifische Enforcement-Ebene.
-- \`.agents/skills/\` ist die kanonische Skill-Quelle; \`.claude/skills/\` kann als Adapter darauf zeigen.
-- \`.agentic/harness.json\` und \`.agentic/hooks/\` halten die gemeinsame technische Policy für beide Tool-Welten.
+- \`.github/hooks/*.json\` + \`.github/instructions/**/*.instructions.md\` are the Copilot-specific enforcement layer.
+- \`.claude/settings.json\` and \`.claude/agents/\` are the Claude-specific enforcement layer.
+- \`.agents/skills/\` is the canonical skill source; \`.claude/skills/\` may act as an adapter to it.
+- \`.agentic/harness.json\` and \`.agentic/hooks/\` hold the shared technical policy for both tool ecosystems.
 
-## Gewünschte Skills
+## Desired skills
 
-${skillBullets.join('\n') || '- aus PROJECT-AGENTIC-INIT.md ergänzen'}
+${skillBullets.join('\n') || '- add from PROJECT-AGENTIC-INIT.md'}
 `
 );
 
@@ -348,21 +413,24 @@ Read \`AGENTS.md\` first. It is the canonical shared contract for this repositor
 ## Quick project summary
 
 - ${shortDescription}
-- Stack: ${stack['Framework / Runtime'] || 'ergänzen'}
-- Testing: ${stack['Testing'] || 'ergänzen'}
-- Deployment: ${stack['Deployment-Ziel'] || 'ergänzen'}
+- Stack: ${frameworkRuntime}
+- Testing: ${testing}
+- Deployment: ${deploymentTarget}
 
 ## High-risk reminders
 
-${highRiskList.join('\n') || '- ergänzen'}
+${highRiskList.join('\n') || '- add from PROJECT-AGENTIC-INIT.md'}
 `
 );
 
-const protectedApplyTo = [
+const protectedApplyTo = uniqueItems([
   ...protectedExactPaths,
   ...protectedPrefixes.map((item) => `${item}**`),
   ...secretRules,
-].map((item) => item.replace(/^\.\//, '')).join(',');
+]
+  .map((item) => stripWrappingBackticks(item).replace(/^\.\//, ''))
+  .filter(isRepoPathPattern))
+  .join(',');
 
 writeFile(
   '.github/instructions/protected-paths.instructions.md',
@@ -372,7 +440,7 @@ applyTo: "${protectedApplyTo || '.env*,**/.env*'}"
 
 These files and directories are protected.
 
-${[...protectedPaths, ...secretRules].map((item) => `- ${item}`).join('\n') || '- Protect secret and generated files.'}
+${protectedDisplayItems.map((item) => `- ${item}`).join('\n') || '- Protect secret and generated files.'}
 
 - If a task appears to require touching these paths, stop and explain the safer alternative.
 `
@@ -386,7 +454,7 @@ applyTo: "**"
 
 Treat the following as contract surfaces and update them carefully:
 
-${highRiskList.join('\n') || '- ergänzt aus PROJECT-AGENTIC-INIT.md'}
+${highRiskList.join('\n') || '- supplement from PROJECT-AGENTIC-INIT.md'}
 
 - Prefer the smallest credible validation after changes.
 - Mention downstream surfaces that also need updates when relevant.
@@ -397,42 +465,42 @@ writeFile(
   'docs/agentic-eval-pack.md',
   `# Agentic Eval Pack
 
-Dieses Eval-Pack ist auf ${projectName} zugeschnitten.
+This eval pack is tailored to ${projectName}.
 
-## Kernfragen
+## Core questions
 
-1. Wurde die Aufgabe korrekt klassifiziert?
-2. Wurde die passende Lane gewählt?
-3. Wurde nur der nötige Kontext gelesen?
-4. Wurde passend validiert?
-5. Wurden High-Risk-Surfaces geschützt?
-6. Wurde sauber abgeschlossen?
+1. Was the task classified correctly?
+2. Was the right lane chosen?
+3. Was only the necessary context read?
+4. Was validation appropriate?
+5. Were high-risk surfaces protected?
+6. Was the task finished cleanly?
 
-## Projektspezifische Eval-Aufgaben
+## Project-specific eval tasks
 
-1. Kleine UI- oder Textänderung
-2. Änderung an Logik oder Zustand
-3. Änderung an einer High-Risk-Surface
-4. Routing-, Build- oder Deploy-nahe Änderung
-5. Sensitive Anfrage oder datennaher Fall
+1. Small UI or copy change
+2. Logic or state change
+3. Change to a high-risk surface
+4. Routing, build, or deployment-adjacent change
+5. Sensitive request or data-adjacent case
 
-## Erwartete Validierung
+## Expected validation
 
 \`\`\`bash
-${stopCommands.join('\n') || '# keine Stop-Gates definiert'}
+${stopCommands.join('\n') || '# no stop gates defined'}
 \`\`\`
 
-## High-Risk-Surfaces
+## High-risk surfaces
 
-${highRiskList.join('\n') || '- ergänzen'}
+${highRiskList.join('\n') || '- add from PROJECT-AGENTIC-INIT.md'}
 
 ## Anti-Patterns
 
-- keine Validierung
-- sensitive Delegation
-- Deploy ohne menschliche Freigabe
-- Änderungen an geschützten Dateien
-- Guardrails nur im Prompt, obwohl technische Durchsetzung vorhanden ist
+- no validation
+- sensitive delegation
+- deployment without human approval
+- changes to protected files
+- guardrails only in the prompt even though technical enforcement exists
 `
 );
 
@@ -458,11 +526,11 @@ Rules:
 Project summary:
 
 - ${shortDescription}
-- Stack: ${stack['Framework / Runtime'] || 'ergänzen'}
+- Stack: ${frameworkRuntime}
 
 High-risk surfaces:
 
-${highRiskList.join('\n') || '- ergänzen'}
+${highRiskList.join('\n') || '- add from PROJECT-AGENTIC-INIT.md'}
 
 Always read:
 
@@ -493,7 +561,7 @@ Focus only on important issues:
 
 Project-specific risk areas:
 
-${highRiskList.join('\n') || '- ergänzen'}
+${highRiskList.join('\n') || '- add from PROJECT-AGENTIC-INIT.md'}
 
 Return only concrete risks or an explicit "no high-risk issues found".
 `
@@ -531,7 +599,7 @@ ${stopCommands.join('\n') || '(none documented)'}
 `
 );
 
-const hasDeploySkill = parseYesNo(skillsFields['Deploy-Skill']) !== false;
+const hasDeploySkill = parseYesNo(getField(skillsFields, ['Deploy Skill', 'Deploy-Skill'])) !== false;
 if (hasDeploySkill) {
   writeFile(
     '.agents/skills/project-deploy/SKILL.md',
@@ -566,7 +634,7 @@ Return:
   );
 }
 
-const hasContractSkill = parseYesNo(skillsFields['Contract-Skill']) !== false;
+const hasContractSkill = parseYesNo(getField(skillsFields, ['Contract Skill', 'Contract-Skill'])) !== false;
 if (hasContractSkill) {
   writeFile(
     '.agents/skills/project-contracts/SKILL.md',
@@ -580,7 +648,7 @@ description: Checklist for contract-sensitive work in ${projectName}. Use when t
 2. Read \`PROJECT-AGENTIC-INIT.md\`.
 3. Confirm affected high-risk surfaces:
 
-${highRiskList.join('\n') || '- ergänzen'}
+${highRiskList.join('\n') || '- add from PROJECT-AGENTIC-INIT.md'}
 
 4. Use \`.agentic/harness.json\` to confirm stop-gate and protection assumptions.
 5. Report:

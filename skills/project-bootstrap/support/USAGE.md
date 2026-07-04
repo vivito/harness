@@ -28,18 +28,18 @@ The skill will infer the stack from the repo and scaffold a best-effort setup.
 ```
 
 ```text
-Nutze PROJECT-AGENTIC-INIT.md und scaffold ein projektweites Claude-Code-Setup.
+Use PROJECT-AGENTIC-INIT.md and scaffold a repo-wide Claude Code setup.
 ```
 
 ```text
-Bitte richte für dieses neue Kundenprojekt CLAUDE.md, .claude/, Skills, Subagents und ein kleines Eval-Pack ein.
+Please set up CLAUDE.md, .claude/, skills, subagents, and a small eval pack for this new client project.
 ```
 
 ## What the skill should produce
 
-- repo-lokale Agent-Dateien
-- Schutz-Hooks
-- wenn sinnvoll auch Post-Edit- und Stop-Hooks
-- Verify-/Deploy-/Surface-/Contract-Skills je nach Stack
-- Eval-Pack
-- keine blinde Überschreibung bestehender Repo-Instruktionen
+- repo-local agent files
+- protection hooks
+- post-edit and stop hooks when they make sense
+- verify / deploy / surface / contract skills depending on the stack
+- eval pack
+- no blind overwriting of existing repo instructions

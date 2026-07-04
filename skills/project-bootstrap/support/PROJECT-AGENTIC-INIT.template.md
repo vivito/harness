@@ -1,117 +1,117 @@
 # PROJECT-AGENTIC-INIT
 
-Diese Datei ist die optionale Projekt-Init-Vorlage für `/project-bootstrap`.
+This file is the optional project-init template for `/project-bootstrap`.
 
-Lege sie in einem neuen Projekt im Repo-Root als `PROJECT-AGENTIC-INIT.md` ab, passe die Punkte kurz an und bitte den Agenten dann:
+Place it at the repo root of a new project as `PROJECT-AGENTIC-INIT.md`, adjust the relevant points briefly, and then ask the agent:
 
 ```text
 /project-bootstrap
 ```
 
-Oder:
+Or:
 
 ```text
-Nutze PROJECT-AGENTIC-INIT.md und bootstrappe das Agentic-Setup für dieses Projekt.
+Use PROJECT-AGENTIC-INIT.md and bootstrap the agentic setup for this project.
 ```
 
 ---
 
-## 1. Projektüberblick
+## 1. Project Overview
 
-- **Projektname:**  
-- **Kurzbeschreibung:**  
-- **Kundentyp / Kontext:**  
-- **Wichtige Ziele des Agent-Setups:**  
+- **Project Name:**  
+- **Short Description:**  
+- **Customer Type / Context:**  
+- **Important goals of the agent setup:**  
 
 ## 2. Tech Stack
 
 - **Framework / Runtime:**  
 - **Frontend / Backend:**  
-- **Datenbank / ORM:**  
+- **Database / ORM:**  
 - **Testing:**  
-- **Deployment-Ziel:**  
+- **Deployment Target:**  
 
-## 3. Wichtige Commands
+## 3. Important Commands
 
 ```bash
-# installieren
+# install
 
-# entwickeln
+# develop
 
-# bauen
+# build
 
-# linten
+# lint
 
-# testen
+# test
 
-# deployen
+# deploy
 ```
 
-### Günstige Post-Edit-Checks
+### Cheap Post-Edit Checks
 
-Welche günstigen Checks kann der Agent direkt nach Dateibearbeitungen laufen lassen?
+Which inexpensive checks can the agent run directly after file edits?
 
 ```bash
 # formatter / lint / syntax-check
 ```
 
-### Harte Stop-Gates
+### Hard Stop Gates
 
-Welche Commands müssen grün sein, bevor ein Agent den Zustand als "fertig" behandeln darf?
+Which commands must be green before an agent may treat the state as "done"?
 
 ```bash
 # build / test / lint / schema-validate
 ```
 
-## 4. Harte Grenzen / Guardrails
+## 4. Hard Boundaries / Guardrails
 
-- Dateien oder Pfade, die nie automatisch bearbeitet werden sollen:
+- Files or paths that must never be edited automatically:
   - 
-- Secrets / Env-Dateien:
+- Secrets / environment files:
   - 
-- Deploy-/Produktiv-Kommandos, die immer menschlich freigegeben bleiben:
+- Deployment / production commands that always require human approval:
   - 
-- Datenbank-/Migrationsregeln:
+- Database / migration rules:
   - 
 
-## 5. High-Risk-Surfaces
+## 5. High-Risk Surfaces
 
 - Auth:
 - Routing:
-- Zahlungen / Bestellungen:
-- Kunden- oder Personendaten:
-- externe APIs / SSO / Sync:
-- Sonstige kritische Flows:
+- Payments / orders:
+- Customer or personal data:
+- External APIs / SSO / sync:
+- Other critical flows:
 
-## 6. Architekturregeln
+## 6. Architecture Rules
 
-- bestehende Muster, die der Agent respektieren soll:
+- existing patterns the agent should respect:
   - 
-- bevorzugte Struktur:
+- preferred structure:
   - 
-- Dinge, die der Agent nicht neu einführen soll:
-  - 
-
-## 7. Sprach- und Copy-Regeln
-
-- Standardsprache:
-- Ton / Copy-Richtung:
-- i18n-Besonderheiten:
-
-## 8. Gewünschte Skills
-
-Welche Projekt-Skills wären sinnvoll?
-
-- Verify-Skill: ja / nein
-- Deploy-Skill: ja / nein
-- Surface-Skill: ja / nein
-- Contract-Skill: ja / nein
-- zusätzliche Wunsch-Skills:
+- things the agent should not introduce:
   - 
 
-## 9. Output-Wunsch
+## 7. Language and Copy Rules
 
-Der Bootstrap soll möglichst anlegen:
+- Default language:
+- Tone / Copy direction:
+- i18n specifics:
+
+## 8. Desired Skills
+
+Which project skills would be useful?
+
+- Verify Skill: yes / no
+- Deploy Skill: yes / no
+- Surface Skill: yes / no
+- Contract Skill: yes / no
+- additional desired skills:
+  - 
+
+## 9. Desired Output
+
+The bootstrap should create, where possible:
 
 - `CLAUDE.md`
 - `.claudeignore`
@@ -121,14 +121,14 @@ Der Bootstrap soll möglichst anlegen:
 - `.claude/skills/`
 - `docs/agentic-eval-pack.md`
 
-Falls etwas davon nicht sinnvoll ist, soll der Agent es begründen statt blind anlegen.
+If something here does not make sense, the agent should explain it instead of creating it blindly.
 
-## 10. Hook-Wunsch
+## 10. Hook Preferences
 
-Welche Hook-Ebenen sollen möglichst entstehen?
+Which hook layers should ideally be created?
 
-- PreToolUse-Schutz: ja / nein
-- PostToolUse-Checks: ja / nein
-- Stop-Gate mit Build/Test/Lint: ja / nein
+- PreToolUse protection: yes / no
+- PostToolUse checks: yes / no
+- Stop gate with build/test/lint: yes / no
 
-Wenn eine Ebene nicht sinnvoll ist, soll der Agent erklären warum.
+If a layer does not make sense, the agent should explain why.

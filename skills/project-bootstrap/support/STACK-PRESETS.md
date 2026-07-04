@@ -1,17 +1,17 @@
 # Stack Presets for /project-bootstrap
 
-Diese Datei hilft `/project-bootstrap`, typische Projekttypen konsistent zu scaffolden.
+This file helps `/project-bootstrap` scaffold common project types consistently.
 
 ## 1. Vite / Static Marketing Site
 
-Typische Merkmale:
+Typical signals:
 
 - `vite.config.*`
 - `index.html`
-- evtl. mehrere HTML-Entry-Points
+- possibly multiple HTML entry points
 - `build`, `dev`, `preview`
 
-Empfohlene Outputs:
+Recommended outputs:
 
 - `CLAUDE.md`
 - `.claudeignore`
@@ -23,29 +23,29 @@ Empfohlene Outputs:
 - `.agentic/hooks/stop-verify.mjs`
 - `fast-worker`
 - `reviewer`
-- `verify`-Skill
-- `deploy`-Skill
-- `surface`-Skill
+- `verify` skill
+- `deploy` skill
+- `surface` skill
 - `agentic-eval-pack.md`
 
-Default-Risiken:
+Default risks:
 
 - `dist/`
 - `.vite/`
-- Deployment-Skripte
+- deployment scripts
 - `.env*`
-- manuelle Entry-Point-Verdrahtung
+- manual entry-point wiring
 
 ## 2. Next.js / App Router / Fullstack
 
-Typische Merkmale:
+Typical signals:
 
 - `next.config.*`
 - `src/app/`
 - `build`, `dev`, `start`
-- ggf. Prisma oder API-Routes
+- possibly Prisma or API routes
 
-Empfohlene Outputs:
+Recommended outputs:
 
 - `CLAUDE.md`
 - `.claudeignore`
@@ -57,30 +57,30 @@ Empfohlene Outputs:
 - `.agentic/hooks/stop-verify.mjs`
 - `fast-worker`
 - `reviewer`
-- `verify`-Skill
-- `deploy`-Skill
-- `contracts`-Skill
+- `verify` skill
+- `deploy` skill
+- `contracts` skill
 - `agentic-eval-pack.md`
 
-Default-Risiken:
+Default risks:
 
 - `.next/`
 - `.env*`
-- Auth
+- auth
 - API routes
 - existing migrations
 - local DB files
 
 ## 3. React SPA / Dashboard
 
-Typische Merkmale:
+Typical signals:
 
 - `src/main.*`
-- Router
+- router
 - component-heavy UI
-- optional backend API in same repo
+- optional backend API in the same repo
 
-Empfohlene Outputs:
+Recommended outputs:
 
 - `CLAUDE.md`
 - `.claudeignore`
@@ -92,12 +92,12 @@ Empfohlene Outputs:
 - `.agentic/hooks/stop-verify.mjs`
 - `fast-worker`
 - `reviewer`
-- `verify`-Skill
-- `surface`-Skill
-- optional `contracts`-Skill
+- `verify` skill
+- `surface` skill
+- optional `contracts` skill
 - `agentic-eval-pack.md`
 
-Default-Risiken:
+Default risks:
 
 - route surface drift
 - shared state regressions
@@ -105,12 +105,12 @@ Default-Risiken:
 
 ## 4. Prisma / DB-Backed App
 
-Zusätzliche Guardrails:
+Additional guardrails:
 
-- block existing migrations from edits
+- block edits to existing migrations
 - block local DB artifacts
 - never auto-apply deploy migrations
-- add `prisma validate` or equivalent to verify skill
+- add `prisma validate` or equivalent to the verify skill
 - prefer a `stop-verify.mjs` hook that includes schema/runtime validation
 
 ## 5. Deployment Rule

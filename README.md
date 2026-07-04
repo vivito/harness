@@ -1,21 +1,21 @@
 # Harness
 
-Versionierbares, tool-neutrales Agentic-Harness für neue Projekte.
+Versioned, tool-neutral agentic harness for new projects.
 
-Dieses Repository hält die **kanonischen Quellen** für:
+This repository contains the **canonical sources** for:
 
-- das Bootstrap-Kommando `agentic-project-init`
-- die Projekt-Init-Vorlage `PROJECT-AGENTIC-INIT.md`
-- Shared-Instruction-Templates (`AGENTS.md`, Copilot-Instructions, Eval-Pack)
-- das globale Bootstrap-Skill
+- the bootstrap command `agentic-project-init`
+- the project-init template `PROJECT-AGENTIC-INIT.md`
+- shared instruction templates (`AGENTS.md`, Copilot instructions, eval pack)
+- the global bootstrap skill
 
-Ziel:
+Goals:
 
-1. ein neues Projekt schnell mit einer sauberen Agentic-Struktur versehen
-2. Copilot und Claude parallel unterstützen
-3. Portabilität und technische Durchsetzung kombinieren
+1. scaffold a clean agentic structure into a new project quickly
+2. support Copilot and Claude in parallel
+3. combine portability with technical enforcement
 
-## Struktur
+## Structure
 
 ```text
 harness/
@@ -37,9 +37,9 @@ harness/
 └── install.sh
 ```
 
-## Installation auf einem Mac
+## Installation on macOS
 
-Nach dem Klonen:
+After cloning:
 
 ```bash
 bash install.sh
@@ -52,57 +52,57 @@ bash install.sh --skip-claude
 bash install.sh --skip-copilot
 ```
 
-Das installiert:
+This installs:
 
 - `~/.local/bin/agentic-project-init`
 - `~/.config/agentic-bootstrap/`
 - `~/.copilot/instructions/agentic-bootstrap.instructions.md`
 - `~/.agents/skills/project-bootstrap/`
-- `~/.claude/skills/project-bootstrap` als Adapter
+- `~/.claude/skills/project-bootstrap` as an adapter
 
-## Verwendung
+## Usage
 
-In einem neuen Projekt:
+In a new project:
 
 ```bash
 agentic-project-init .
 ```
 
-Dann `PROJECT-AGENTIC-INIT.md` ausfüllen und anwenden:
+Then fill out and apply `PROJECT-AGENTIC-INIT.md`:
 
 ```bash
 agentic-project-init . --apply-init --force
 ./test-harness.sh
 ```
 
-## Architekturprinzip
+## Architecture principles
 
-### Kanonische Shared-Dateien
+### Canonical shared files
 
 - `AGENTS.md`
 - `PROJECT-AGENTIC-INIT.md`
 - `docs/agentic-eval-pack.md`
 
-### Copilot-Layer
+### Copilot layer
 
 - `.github/copilot-instructions.md`
 - `.github/instructions/**/*.instructions.md`
 - `.github/hooks/*.json`
 
-### Claude-Layer
+### Claude layer
 
 - `.claude/settings.json`
 - `.claude/agents/*`
-- `.claude/skills` (Adapter)
+- `.claude/skills` (adapter)
 
-### Gemeinsame technische Policy
+### Shared technical policy
 
 - `.agentic/harness.json`
 - `.agentic/hooks/*`
 
-### Kanonische Skill-Quelle
+### Canonical skill source
 
 - global: `~/.agents/skills/`
-- repo-lokal: `.agents/skills/`
+- repo-local: `.agents/skills/`
 
-Claude nutzt nur noch einen Adapter auf diese Skill-Quelle.
+Claude now uses only an adapter pointing at this skill source.

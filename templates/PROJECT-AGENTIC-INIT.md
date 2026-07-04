@@ -1,103 +1,103 @@
 # PROJECT-AGENTIC-INIT
 
-Diese Datei ist der tool-neutrale Bootstrap-Vertrag für __PROJECT_NAME__.
+This file is the tool-neutral bootstrap contract for __PROJECT_NAME__.
 
-Lege sie in ein neues Projekt und bitte deinen Agenten dann sinngemäß:
+Put it into a new project and then ask your agent something like:
 
 ```text
-Nutze PROJECT-AGENTIC-INIT.md und richte das Agentic-Setup für dieses Projekt ein.
+Use PROJECT-AGENTIC-INIT.md and set up the agentic environment for this project.
 ```
 
-## 1. Projektüberblick
+## 1. Project Overview
 
-- **Projektname:** __PROJECT_NAME__
-- **Kurzbeschreibung:**  
-- **Kundentyp / Kontext:**  
-- **Wichtige Ziele des Agent-Setups:**  
+- **Project Name:** __PROJECT_NAME__
+- **Short Description:**  
+- **Customer Type / Context:**  
+- **Important goals of the agent setup:**  
 
 ## 2. Tech Stack
 
 - **Framework / Runtime:**  
 - **Frontend / Backend:**  
-- **Datenbank / ORM:**  
+- **Database / ORM:**  
 - **Testing:**  
-- **Deployment-Ziel:**  
+- **Deployment Target:**  
 
-## 3. Wichtige Commands
+## 3. Important Commands
 
 ```bash
-# installieren
+# install
 
-# entwickeln
+# develop
 
-# bauen
+# build
 
-# linten
+# lint
 
-# testen
+# test
 
-# deployen
+# deploy
 ```
 
-### Günstige Post-Edit-Checks
+### Cheap Post-Edit Checks
 
 ```bash
 # formatter / lint / syntax-check
 ```
 
-### Harte Stop-Gates
+### Hard Stop Gates
 
 ```bash
 # build / test / lint / schema-validate
 ```
 
-## 4. Harte Grenzen / Guardrails
+## 4. Hard Boundaries / Guardrails
 
-- Dateien oder Pfade, die nie automatisch bearbeitet werden sollen:
+- Files or paths that must never be edited automatically:
   - 
-- Secrets / Env-Dateien:
+- Secrets / environment files:
   - 
-- Deploy-/Produktiv-Kommandos, die immer menschlich freigegeben bleiben:
+- Deployment / production commands that always require human approval:
   - 
-- Datenbank-/Migrationsregeln:
+- Database / migration rules:
   - 
 
-## 5. High-Risk-Surfaces
+## 5. High-Risk Surfaces
 
 - Auth:
 - Routing:
-- Zahlungen / Bestellungen:
-- Kunden- oder Personendaten:
-- externe APIs / SSO / Sync:
-- sonstige kritische Flows:
+- Payments / orders:
+- Customer or personal data:
+- External APIs / SSO / sync:
+- Other critical flows:
 
-## 6. Architekturregeln
+## 6. Architecture Rules
 
-- bestehende Muster, die der Agent respektieren soll:
+- existing patterns the agent should respect:
   - 
-- bevorzugte Struktur:
+- preferred structure:
   - 
-- Dinge, die der Agent nicht neu einführen soll:
-  - 
-
-## 7. Sprach- und Copy-Regeln
-
-- Standardsprache:
-- Ton / Copy-Richtung:
-- i18n-Besonderheiten:
-
-## 8. Gewünschte Skills
-
-- Verify-Skill: ja / nein
-- Deploy-Skill: ja / nein
-- Surface-Skill: ja / nein
-- Contract-Skill: ja / nein
-- zusätzliche Wunsch-Skills:
+- things the agent should not introduce:
   - 
 
-## 9. Output-Wunsch
+## 7. Language and Copy Rules
 
-Der Bootstrap soll möglichst anlegen oder pflegen:
+- Default language:
+- Tone / Copy direction:
+- i18n specifics:
+
+## 8. Desired Skills
+
+- Verify Skill: yes / no
+- Deploy Skill: yes / no
+- Surface Skill: yes / no
+- Contract Skill: yes / no
+- additional desired skills:
+  - 
+
+## 9. Desired Output
+
+The bootstrap should create or maintain, where possible:
 
 - `AGENTS.md`
 - `CLAUDE.md`
@@ -115,10 +115,10 @@ Der Bootstrap soll möglichst anlegen oder pflegen:
 - `docs/agentic-eval-pack.md`
 - `test-harness.sh`
 
-## 10. Hook-Wunsch
+## 10. Hook Preferences
 
-- PreToolUse-Schutz: ja / nein
-- PostToolUse-Checks: ja / nein
-- Stop-Gate mit Build/Test/Lint: ja / nein
+- PreToolUse protection: yes / no
+- PostToolUse checks: yes / no
+- Stop gate with build/test/lint: yes / no
 
-Wenn eine Ebene nicht sinnvoll ist, soll der Agent begründen warum.
+If a layer does not make sense, the agent should explain why.

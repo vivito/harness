@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "command": "node .agentic/hooks/protect-files-copilot.mjs",
+        "cwd": ".",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

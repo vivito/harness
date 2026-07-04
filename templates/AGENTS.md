@@ -1,69 +1,69 @@
 # __PROJECT_NAME__ - Agent Contract
 
-Diese Datei ist die **kanonische** Instruktionsdatei für dieses Projekt.
+This file is the **canonical** instruction file for this project.
 
-Wenn `PROJECT-AGENTIC-INIT.md` existiert, ist sie die wichtigste Quelle für:
+If `PROJECT-AGENTIC-INIT.md` exists, it is the primary source for:
 
-- Projektüberblick
-- Stack
-- Validierungs-Commands
-- Guardrails
-- High-Risk-Surfaces
-- gewünschte Skills und Hook-Ebenen
+- project overview
+- stack
+- validation commands
+- guardrails
+- high-risk surfaces
+- desired skills and hook layers
 
-## Arbeitsprinzipien
+## Working principles
 
-- Architektur, Privacy und finale Entscheidungen bleiben in der vertrauenswürdigen Haupt-Lane.
-- Begrenzte, klar geschnittene Aufgaben können an günstigere Worker-Lanes delegiert werden.
-- Deployment bleibt menschlich freigegeben.
-- Vor Abschluss immer die kleinste passende Validierung ausführen.
-- Nach stabilem Ergebnis committen und pushen, wenn das Projekt Git nutzt.
+- Architecture, privacy, and final decisions stay in the trusted main lane.
+- Bounded, clearly scoped tasks may be delegated to cheaper worker lanes.
+- Deployment remains human-gated.
+- Always run the smallest appropriate validation before finishing.
+- After a stable result, commit and push if the project uses Git.
 
-## Bootstrap-Regel
+## Bootstrap rule
 
-Wenn diese Datei noch Platzhalter oder Lücken enthält:
+If this file still contains placeholders or gaps:
 
-1. lies `PROJECT-AGENTIC-INIT.md`
-2. leite daraus die projektspezifischen Regeln ab
-3. vervollständige das Setup vorsichtig
-4. überschreibe bestehende Projektkonventionen nicht blind
+1. read `PROJECT-AGENTIC-INIT.md`
+2. derive the project-specific rules from it
+3. complete the setup carefully
+4. do not overwrite existing project conventions blindly
 
-## Projektüberblick
+## Project overview
 
 - **Name:** __PROJECT_NAME__
-- **Kurzbeschreibung:** aus `PROJECT-AGENTIC-INIT.md` übernehmen
-- **Wichtige Ziele:** aus `PROJECT-AGENTIC-INIT.md` übernehmen
+- **Short description:** copy from `PROJECT-AGENTIC-INIT.md`
+- **Important goals:** copy from `PROJECT-AGENTIC-INIT.md`
 
-## Validierung
+## Validation
 
-Die kanonischen Commands stehen in `PROJECT-AGENTIC-INIT.md`.
+The canonical commands live in `PROJECT-AGENTIC-INIT.md`.
 
-Regel:
+Rule:
 
-- zuerst den kleinsten glaubwürdigen Check
-- Builds, Tests, Lint und Schema-Checks nur so breit wie nötig
+- start with the smallest credible check
+- keep builds, tests, lint, and schema checks as narrow as possible
 
 ## Guardrails
 
-Mindestens schützen:
+At minimum, protect:
 
 - `.env*`
-- Secrets
-- generierten Build-Output
-- Deploy-Schritte
-- lokale Datenbanken oder bestehende Migrationen, wenn relevant
+- secrets
+- generated build output
+- deployment steps
+- local databases or existing migrations when relevant
 
-## Tool-Kompatibilität
+## Tool compatibility
 
-- `AGENTS.md` ist die Hauptquelle
-- `CLAUDE.md` und `GEMINI.md` können auf diese Datei verweisen oder sie spiegeln
-- `.github/copilot-instructions.md` ergänzt Copilot-spezifische Hinweise, ersetzt diese Datei aber nicht
-- `.github/hooks/*.json` und `.claude/settings.json` sind die technischen Guardrail-Ebenen, wenn das Projekt einen Enforcement-Layer nutzt
-- `.agentic/harness.json` und `.agentic/hooks/` halten die gemeinsame Hook- und Verify-Policy für mehrere Tools
+- `AGENTS.md` is the main source
+- `CLAUDE.md` and `GEMINI.md` may point to or mirror this file
+- `.github/copilot-instructions.md` adds Copilot-specific guidance but does not replace this file
+- `.github/hooks/*.json` and `.claude/settings.json` are the technical guardrail layers when the project uses an enforcement layer
+- `.agentic/harness.json` and `.agentic/hooks/` hold the shared hook and verify policy across tools
 
-## Noch zu konkretisieren
+## Still to be specified
 
-- Stack-spezifische Architekturregeln
-- repo-spezifische High-Risk-Surfaces
-- Hook-Policy
-- Eval-Pack
+- stack-specific architecture rules
+- repo-specific high-risk surfaces
+- hook policy
+- eval pack
