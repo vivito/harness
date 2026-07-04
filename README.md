@@ -1,7 +1,5 @@
 # Harness
 
-Versioned, tool-neutral agentic harness for new projects.
-
 This repository contains the **canonical sources** for:
 
 - the bootstrap command `agentic-project-init`
