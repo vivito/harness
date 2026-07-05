@@ -1,4 +1,4 @@
-import { readStdin, loadHarnessConfig, parseHookInput, normalizePath, isProtectedPath, isDeniedCommand } from './harness-lib.mjs';
+import { readStdin, loadHarnessConfig, parseHookInput, getToolPaths, getSearchPaths, isProtectedPath, isProtectedExistingPath, isDeniedCommand } from './harness-lib.mjs';
 
 const raw = await readStdin();
 const payload = raw.trim() ? JSON.parse(raw) : {};
@@ -6,9 +6,14 @@ const config = loadHarnessConfig();
 const { toolName, toolArgs } = parseHookInput(payload);
 
 let reason = null;
-if (/^(edit|create|view)$/i.test(toolName)) {
-  const relativePath = normalizePath(toolArgs?.file_path || toolArgs?.path || '');
-  reason = isProtectedPath(relativePath, config);
+if (/^(edit|create|view|read|write|multiedit)$/i.test(toolName)) {
+  reason = getToolPaths(toolName, toolArgs)
+    .map((relativePath) => isProtectedPath(relativePath, config) || isProtectedExistingPath(relativePath, config))
+    .find(Boolean) || null;
+} else if (/^(rg|glob|grep)$/i.test(toolName)) {
+  reason = getSearchPaths(toolArgs)
+    .map((relativePath) => isProtectedPath(relativePath, config) || isProtectedExistingPath(relativePath, config))
+    .find(Boolean) || null;
 } else if (/^(bash|powershell)$/i.test(toolName)) {
   reason = isDeniedCommand(toolArgs?.command || '', config);
 }

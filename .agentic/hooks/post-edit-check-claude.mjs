@@ -1,12 +1,17 @@
-import { readStdin, loadHarnessConfig, runCommands, summarizeFailures } from './harness-lib.mjs';
+import { readStdin, loadHarnessConfig, parseHookInput, getToolPaths, getCommandPaths, selectPostEditCommands, runCommands, summarizeFailures } from './harness-lib.mjs';
 
 const raw = await readStdin();
 const payload = raw.trim() ? JSON.parse(raw) : {};
-if (payload?.toolName || payload?.toolArgs || payload?.sessionId) {
+const { toolName, toolArgs, isCopilot } = parseHookInput(payload);
+if (isCopilot) {
   process.exit(0);
 }
+
 const config = loadHarnessConfig();
-const commands = config.postEditCommands || [];
+const relativePaths = /^(bash|powershell)$/i.test(toolName)
+  ? getCommandPaths(toolArgs?.command || '')
+  : getToolPaths(toolName, toolArgs);
+const commands = selectPostEditCommands(relativePaths, config);
 
 if (commands.length === 0) process.exit(0);
 
@@ -16,7 +21,7 @@ if (failureSummary) {
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PostToolUse',
-      additionalContext: `Post-edit checks failed:\n${failureSummary}`,
+      additionalContext: `Post-edit checks failed${relativePaths.length ? ` for ${relativePaths.join(', ')}` : ''}:\n${failureSummary}`,
     },
   }));
 }

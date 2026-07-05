@@ -58,6 +58,24 @@ node_check() {
   fi
 }
 
+harness_has_post_edit_checks() {
+  node - <<'NODE' >/dev/null 2>&1
+const fs = require('node:fs');
+const data = JSON.parse(fs.readFileSync('.agentic/harness.json', 'utf8'));
+const hasCommands = Array.isArray(data.postEditCommands) && data.postEditCommands.length > 0;
+const hasRules = Array.isArray(data.postEditRules) && data.postEditRules.length > 0;
+process.exit(hasCommands || hasRules ? 0 : 1);
+NODE
+}
+
+harness_has_stop_checks() {
+  node - <<'NODE' >/dev/null 2>&1
+const fs = require('node:fs');
+const data = JSON.parse(fs.readFileSync('.agentic/harness.json', 'utf8'));
+process.exit(Array.isArray(data.stopCommands) && data.stopCommands.length > 0 ? 0 : 1);
+NODE
+}
+
 echo "== Agentic Harness Check =="
 echo "Root: $ROOT_DIR"
 echo
@@ -155,6 +173,24 @@ if [[ -f ".agentic/hooks/stop-verify.mjs" ]]; then
   fi
 fi
 
+if [[ -f ".agentic/harness.json" ]]; then
+  if harness_has_post_edit_checks; then
+    if [[ -f ".github/hooks/post-edit-check.json" ]]; then
+      pass "Copilot post-edit hook wiring exists"
+    else
+      fail "Harness config expects Copilot post-edit hook wiring"
+    fi
+  fi
+
+  if harness_has_stop_checks; then
+    if [[ -f ".github/hooks/stop-verify.json" ]]; then
+      pass "Copilot stop hook wiring exists"
+    else
+      fail "Harness config expects Copilot stop hook wiring"
+    fi
+  fi
+fi
+
 if [[ -f ".github/hooks/post-edit-check.json" && ! -f ".agentic/hooks/post-edit-check-copilot.mjs" ]]; then
   fail "Copilot post-edit hook configured but implementation missing"
 fi
@@ -166,15 +202,30 @@ fi
 if [[ -f ".claude/settings.json" ]]; then
   if node - <<'NODE' >/dev/null 2>&1
 const fs = require('node:fs');
-const data = JSON.parse(fs.readFileSync('.claude/settings.json', 'utf8'));
-const hooks = data.hooks || {};
+const settings = JSON.parse(fs.readFileSync('.claude/settings.json', 'utf8'));
+const harness = JSON.parse(fs.readFileSync('.agentic/harness.json', 'utf8'));
+const hooks = settings.hooks || {};
+const hasPostChecks = (Array.isArray(harness.postEditCommands) && harness.postEditCommands.length > 0)
+  || (Array.isArray(harness.postEditRules) && harness.postEditRules.length > 0);
+const hasStopChecks = Array.isArray(harness.stopCommands) && harness.stopCommands.length > 0;
 if (!hooks.PreToolUse) process.exit(1);
+if (hasPostChecks && !hooks.PostToolUse) process.exit(2);
+if (hasStopChecks && !hooks.Stop) process.exit(3);
 process.exit(0);
 NODE
   then
-    pass "Claude settings include hook wiring"
+    pass "Claude settings include expected hook wiring"
   else
-    fail "Claude settings are missing expected hook wiring"
+    status=$?
+    if [[ "$status" -eq 1 ]]; then
+      fail "Claude settings are missing PreToolUse wiring"
+    elif [[ "$status" -eq 2 ]]; then
+      fail "Claude settings are missing PostToolUse wiring"
+    elif [[ "$status" -eq 3 ]]; then
+      fail "Claude settings are missing Stop wiring"
+    else
+      fail "Claude settings are missing expected hook wiring"
+    fi
   fi
 fi
 

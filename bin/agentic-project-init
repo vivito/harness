@@ -2,12 +2,21 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -d "${HOME}/.config/agentic-bootstrap/templates" ]]; then
-  TEMPLATE_DIR="${HOME}/.config/agentic-bootstrap/templates"
-elif [[ -d "${SCRIPT_DIR}/../templates" ]]; then
+if [[ -d "${SCRIPT_DIR}/../templates" ]]; then
   TEMPLATE_DIR="${SCRIPT_DIR}/../templates"
+elif [[ -d "${HOME}/.config/agentic-bootstrap/templates" ]]; then
+  TEMPLATE_DIR="${HOME}/.config/agentic-bootstrap/templates"
 else
   echo "Could not locate templates directory." >&2
+  exit 1
+fi
+
+if [[ -f "${SCRIPT_DIR}/apply-project-agentic-init.mjs" ]]; then
+  APPLY_INIT_SCRIPT="${SCRIPT_DIR}/apply-project-agentic-init.mjs"
+elif [[ -f "${HOME}/.config/agentic-bootstrap/bin/apply-project-agentic-init.mjs" ]]; then
+  APPLY_INIT_SCRIPT="${HOME}/.config/agentic-bootstrap/bin/apply-project-agentic-init.mjs"
+else
+  echo "Could not locate apply-project-agentic-init.mjs." >&2
   exit 1
 fi
 TARGET_DIR="."
@@ -221,6 +230,7 @@ collect_matching_scripts() {
 
 declare -a protected_exact=(".env" ".env.local")
 declare -a protected_prefixes=("node_modules/" ".git/" ".github/hooks/" ".agentic/tmp/" "coverage/" "test-results/")
+declare -a protected_existing_prefixes=()
 declare -a protected_regexes=("^\\.env\\..+")
 declare -a denied_command_regexes=("^git push( .*)?$" "^rm -rf( .*)?$")
 declare -a stop_commands=()
@@ -254,7 +264,7 @@ if [[ -f "${TARGET_DIR}/package.json" ]]; then
     has_prisma="1"
     append_unique stack_tags "prisma"
     append_unique protected_regexes "^prisma/.*\\.db(-journal|-wal|-shm)?$"
-    append_unique protected_prefixes "prisma/migrations/"
+    append_unique protected_existing_prefixes "prisma/migrations/"
   fi
 
   if package_has_script build; then
@@ -350,11 +360,15 @@ EOF
   for prefix in "${protected_prefixes[@]}"; do
     printf '%s\n' "/${prefix}" >> "${TARGET_DIR}/.claudeignore"
   done
+  for prefix in "${protected_existing_prefixes[@]-}"; do
+    printf '%s\n' "/${prefix}" >> "${TARGET_DIR}/.claudeignore"
+  done
   sort -u -o "${TARGET_DIR}/.claudeignore" "${TARGET_DIR}/.claudeignore"
 
   harness_path="${TARGET_DIR}/.agentic/harness.json"
   protected_exact_json="$(json_array_var protected_exact)"
   protected_prefixes_json="$(json_array_var protected_prefixes)"
+  protected_existing_prefixes_json="$(json_array_var protected_existing_prefixes)"
   protected_regexes_json="$(json_array_var protected_regexes)"
   denied_commands_json="$(json_array_var denied_command_regexes)"
   post_edit_json="$(json_array_var post_edit_commands)"
@@ -367,6 +381,7 @@ EOF
   "stackTags": ${stack_json},
   "protectedExactPaths": ${protected_exact_json},
   "protectedPrefixes": ${protected_prefixes_json},
+  "protectedExistingPrefixes": ${protected_existing_prefixes_json},
   "protectedRegexes": ${protected_regexes_json},
   "deniedCommandRegexes": ${denied_commands_json},
   "postEditCommands": ${post_edit_json},
@@ -378,6 +393,15 @@ EOF
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const HOOKS_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+export function getProjectRoot() {
+  const rootFromEnv = process.env.CLAUDE_PROJECT_DIR || process.env.GITHUB_WORKSPACE;
+  if (rootFromEnv) return path.resolve(rootFromEnv);
+  return path.resolve(HOOKS_DIR, '..', '..');
+}
 
 export function readStdin() {
   return new Promise((resolve, reject) => {
@@ -392,15 +416,155 @@ export function readStdin() {
 }
 
 export function loadHarnessConfig() {
-  const configPath = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'harness.json');
+  const configPath = path.join(getProjectRoot(), '.agentic', 'harness.json');
   return JSON.parse(fs.readFileSync(configPath, 'utf8'));
 }
 
 export function normalizePath(candidatePath) {
   if (!candidatePath) return '';
-  const absolute = path.resolve(process.cwd(), candidatePath);
-  const relative = path.relative(process.cwd(), absolute);
+  const projectRoot = getProjectRoot();
+  const absolute = path.resolve(projectRoot, candidatePath);
+  const relative = path.relative(projectRoot, absolute);
+  if (!relative) return '.';
   return relative.split(path.sep).join('/');
+}
+
+function escapeRegex(source) {
+  return source.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
+}
+
+export function matchesPathPattern(relativePath, pattern) {
+  if (!relativePath || !pattern) return false;
+
+  let source = '^';
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+    if (char === '*') {
+      const next = pattern[index + 1];
+      if (next === '*') {
+        source += '.*';
+        index += 1;
+      } else {
+        source += '[^/]*';
+      }
+      continue;
+    }
+
+    if (char === '?') {
+      source += '[^/]';
+      continue;
+    }
+
+    source += escapeRegex(char);
+  }
+
+  source += '$';
+  return new RegExp(source).test(relativePath);
+}
+
+export function getToolPaths(toolName, toolArgs) {
+  if (!/^(edit|write|create|multiedit|read|view)$/i.test(toolName || '')) {
+    return [];
+  }
+
+  const candidates = [
+    toolArgs?.file_path,
+    toolArgs?.path,
+  ];
+
+  return [...new Set(candidates.map(normalizePath).filter(Boolean))];
+}
+
+export function getSearchPaths(toolArgs) {
+  const rawPaths = Array.isArray(toolArgs?.paths)
+    ? toolArgs.paths
+    : toolArgs?.paths
+      ? [toolArgs.paths]
+      : [toolArgs?.path];
+
+  return [...new Set(rawPaths.map(normalizePath).filter(Boolean))];
+}
+
+export function getCommandPaths(command) {
+  const strippedCommand = stripLeadingShellPrefixes(command);
+  const nestedShellCommand = extractNestedShellCommand(strippedCommand);
+  const nestedPaths = nestedShellCommand ? getCommandPaths(nestedShellCommand) : [];
+  const rawTokens = String(strippedCommand || '').match(/(?:[^\s"'`]+|"[^"]*"|'[^']*')+/g) || [];
+  const candidates = rawTokens
+    .map((token) => token.replace(/^['"`]+|['"`]+$/g, '').replace(/^[()]+|[()]+$/g, ''))
+    .filter((token) => (
+      token.includes('/')
+      || /\.(?:md|json|js|mjs|sh|jsx|tsx|ts|css|sql)$/i.test(token)
+      || fs.existsSync(path.resolve(getProjectRoot(), token))
+    ));
+
+  return [...new Set([
+    ...nestedPaths,
+    ...candidates.map(normalizePath).filter(Boolean),
+  ])];
+}
+
+function splitCommandSegments(command) {
+  return String(command || '').split(/\s*(?:&&|\|\||\||;|\n)\s*/).filter(Boolean);
+}
+
+function isScriptExecutionSegment(segment) {
+  return (
+    /^(?:\/?[^/\s]+\/)*(?:bash|sh|node|python|python3|perl)\b/.test(segment)
+    || /^\.\//.test(segment)
+    || /^(?:[^/\s]+\/)+[^\s]+\.(?:sh|js|mjs|cjs|py)\b/.test(segment)
+  );
+}
+
+function getNpmRunScriptName(segment) {
+  const match = segment.match(/^npm\s+run(?:\s+--silent)?\s+([^\s]+)\b/);
+  return match ? match[1] : '';
+}
+
+function stripLeadingShellPrefixes(segment) {
+  let remaining = String(segment || '').trim();
+  while (/^(?:\/?[^/\s]+\/)*env\b/.test(remaining)) {
+    remaining = remaining.replace(/^(?:\/?[^/\s]+\/)*env\b\s*/, '').trimStart();
+    while (/^-[^\s]+\s+/.test(remaining)) {
+      remaining = remaining.replace(/^-[^\s]+\s+/, '').trimStart();
+    }
+    if (remaining.startsWith('-- ')) {
+      remaining = remaining.slice(3).trimStart();
+    } else if (remaining === '--') {
+      remaining = '';
+    }
+    while (/^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]+)\s*/.test(remaining)) {
+      remaining = remaining.replace(/^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]+)\s*/, '').trimStart();
+    }
+  }
+  while (true) {
+    const match = remaining.match(/^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]+)\s+/);
+    if (!match) break;
+    remaining = remaining.slice(match[0].length).trimStart();
+  }
+  return remaining;
+}
+
+function extractNestedShellCommand(segment) {
+  const match = segment.match(/^(?:\/?[^/\s]+\/)*(?:bash|sh)\b(?:\s+-[A-Za-z-]+\b)*\s+\$?(['"])([\s\S]*?)\1(?:\s+.*)?$/);
+  return match ? match[2] : '';
+}
+
+function isDirectInlineInterpreterSegment(segment) {
+  return (
+    /^\s*(?:\/?[^/\s]+\/)*node\b(?:\s+(?:--[^\s]+|-[A-Za-z][^\s]*)(?:\s+(?:"[^"]*"|'[^']*'|[^\s]+))?)*\s+(?:-(?:e|p)\b|--(?:eval|print)\b|-\s*(?:<<|$))/s.test(segment)
+    || /^\s*(?:\/?[^/\s]+\/)*python3?\b(?:\s+(?:--[^\s]+|-[A-Za-z][^\s]*)(?:\s+(?:"[^"]*"|'[^']*'|[^\s]+))?)*\s+(?:-c\b|-\s*(?:<<|$))/s.test(segment)
+    || /^\s*(?:\/?[^/\s]+\/)*perl\b(?:\s+(?:--[^\s]+|-[A-Za-z0-9][^\s]*)(?:\s+(?:"[^"]*"|'[^']*'|[^\s]+))?)*\s+(?:-[A-Za-z0-9]*e[A-Za-z0-9]*\b|-\s*(?:<<|$))/s.test(segment)
+  );
+}
+
+function isInlineInterpreterSegment(segment) {
+  const trimmed = stripLeadingShellPrefixes(segment);
+  if (isDirectInlineInterpreterSegment(trimmed)) {
+    return true;
+  }
+  const nestedShellCommand = extractNestedShellCommand(trimmed);
+  return nestedShellCommand ? isInlineInterpreterSegment(nestedShellCommand) : false;
 }
 
 export function parseHookInput(payload) {
@@ -432,6 +596,12 @@ export function parseHookInput(payload) {
 
 export function isProtectedPath(relativePath, config) {
   if (!relativePath) return null;
+  if (relativePath === '.') {
+    return 'Repository-root access must be scoped to child paths.';
+  }
+  if (relativePath === '..' || relativePath.startsWith('../')) {
+    return `${relativePath} is outside the repository root.`;
+  }
 
   for (const exactPath of config.protectedExactPaths || []) {
     if (relativePath === exactPath) {
@@ -455,16 +625,130 @@ export function isProtectedPath(relativePath, config) {
   return null;
 }
 
+export function isProtectedExistingPath(relativePath, config) {
+  if (!relativePath) return null;
+
+  for (const prefix of config.protectedExistingPrefixes || []) {
+    if (relativePath === prefix.replace(/\/$/, '') || relativePath.startsWith(prefix)) {
+      const absolutePath = path.resolve(getProjectRoot(), relativePath);
+      if (fs.existsSync(absolutePath)) {
+        return `${relativePath} already exists inside a history-sensitive protected path (${prefix}). Create a new file instead of rewriting it.`;
+      }
+    }
+  }
+
+  return null;
+}
+
 export function isDeniedCommand(command, config) {
   const normalized = String(command || '').trim();
   if (!normalized) return null;
-  for (const source of config.deniedCommandRegexes || []) {
-    const regex = new RegExp(source);
-    if (regex.test(normalized)) {
-      return `Command is blocked by policy (${source}).`;
+  const strippedNormalized = stripLeadingShellPrefixes(normalized);
+  const nestedWholeCommand = extractNestedShellCommand(strippedNormalized);
+  if (nestedWholeCommand) {
+    const nestedWholeReason = isDeniedCommand(nestedWholeCommand, config);
+    if (nestedWholeReason) {
+      return nestedWholeReason;
     }
   }
+  const segments = splitCommandSegments(normalized);
+
+  for (const segment of segments) {
+    const strippedSegment = stripLeadingShellPrefixes(segment);
+    for (const source of config.deniedCommandRegexes || []) {
+      const regex = new RegExp(source);
+      if (regex.test(segment) || regex.test(strippedSegment)) {
+        return `Command is blocked by policy (${source}).`;
+      }
+    }
+
+    const nestedShellCommand = extractNestedShellCommand(strippedSegment);
+    if (nestedShellCommand) {
+      const nestedReason = isDeniedCommand(nestedShellCommand, config);
+      if (nestedReason) {
+        return nestedReason;
+      }
+    }
+
+    const pathReason = getCommandPaths(strippedSegment)
+      .map((relativePath) => isProtectedPath(relativePath, config))
+      .find(Boolean);
+    if (pathReason) {
+      return pathReason;
+    }
+  }
+
+  if (/(^|[\s"'=])(?:\.\/)?\.env(?:\.[A-Za-z0-9._-]+)?(?=$|[\s"'/:])/.test(normalized)) {
+    return 'Command references a protected env file.';
+  }
+
+  const mutatingSegment = segments.find((segment) => /(>|>>|\b(?:cp|mv|rm|touch|tee|truncate|install)\b|\bsed\b.*\s-i\b|\bperl\b.*\s-i\b)/.test(stripLeadingShellPrefixes(segment)));
+  if (mutatingSegment) {
+    const strippedSegment = stripLeadingShellPrefixes(mutatingSegment);
+    const protectedExistingReason = getCommandPaths(strippedSegment)
+      .map((relativePath) => isProtectedExistingPath(relativePath, config))
+      .find(Boolean);
+    if (protectedExistingReason) {
+      return protectedExistingReason;
+    }
+  }
+
+  const allowedExecutablePaths = new Set(config.allowedExecutablePaths || []);
+  const allowedNpmScripts = new Set(config.allowedNpmScripts || []);
+
+  if (allowedNpmScripts.size > 0) {
+    for (const segment of segments) {
+      const scriptName = getNpmRunScriptName(stripLeadingShellPrefixes(segment));
+      if (scriptName && !allowedNpmScripts.has(scriptName)) {
+        return `Command executes an unapproved npm script (${scriptName}).`;
+      }
+    }
+  }
+
+  const inlineInterpreterSegment = segments.find((segment) => isInlineInterpreterSegment(segment));
+  if (inlineInterpreterSegment) {
+    return 'Inline node/python evaluators are blocked. Put the logic in a checked-in script first.';
+  }
+
+  if (allowedExecutablePaths.size > 0) {
+    for (const segment of segments) {
+      const strippedSegment = stripLeadingShellPrefixes(segment);
+      if (!isScriptExecutionSegment(strippedSegment)) continue;
+      for (const scriptPath of getCommandPaths(strippedSegment).filter((candidate) => candidate !== '.')) {
+        if (!allowedExecutablePaths.has(scriptPath)) {
+          return `Command executes an unapproved local script (${scriptPath}).`;
+        }
+      }
+    }
+  }
+
   return null;
+}
+
+export function selectPostEditCommands(relativePaths, config) {
+  const rules = Array.isArray(config?.postEditRules) ? config.postEditRules : [];
+  const normalizedPaths = [...new Set((relativePaths || []).map(normalizePath).filter(Boolean))];
+  const matchedCommands = [];
+
+  for (const relativePath of normalizedPaths) {
+    for (const rule of rules) {
+      const patterns = Array.isArray(rule?.patterns) ? rule.patterns : [];
+      const commands = Array.isArray(rule?.commands) ? rule.commands : [];
+      if (patterns.some((pattern) => matchesPathPattern(relativePath, pattern))) {
+        matchedCommands.push(...commands);
+      }
+    }
+  }
+
+  if (matchedCommands.length > 0) {
+    return [...new Set(matchedCommands)];
+  }
+
+  if (rules.length > 0) {
+    return [];
+  }
+
+  return Array.isArray(config?.postEditCommands) ? config.postEditCommands : [];
 }
 
 export function runCommands(commands) {
@@ -472,7 +756,7 @@ export function runCommands(commands) {
   for (const command of commands || []) {
     const result = spawnSync(command, {
       shell: true,
-      cwd: process.cwd(),
+      cwd: getProjectRoot(),
       encoding: 'utf8',
       env: process.env,
     });
@@ -500,7 +784,7 @@ export function summarizeFailures(results) {
 EOF
 
   write_file "${TARGET_DIR}/.agentic/hooks/protect-files-copilot.mjs" <<'EOF'
-import { readStdin, loadHarnessConfig, parseHookInput, normalizePath, isProtectedPath, isDeniedCommand } from './harness-lib.mjs';
+import { readStdin, loadHarnessConfig, parseHookInput, getToolPaths, getSearchPaths, isProtectedPath, isProtectedExistingPath, isDeniedCommand } from './harness-lib.mjs';
 
 const raw = await readStdin();
 const payload = raw.trim() ? JSON.parse(raw) : {};
@@ -508,9 +792,14 @@ const config = loadHarnessConfig();
 const { toolName, toolArgs } = parseHookInput(payload);
 
 let reason = null;
-if (/^(edit|create|view)$/i.test(toolName)) {
-  const relativePath = normalizePath(toolArgs?.file_path || toolArgs?.path || '');
-  reason = isProtectedPath(relativePath, config);
+if (/^(edit|create|view|read|write|multiedit)$/i.test(toolName)) {
+  reason = getToolPaths(toolName, toolArgs)
+    .map((relativePath) => isProtectedPath(relativePath, config) || isProtectedExistingPath(relativePath, config))
+    .find(Boolean) || null;
+} else if (/^(rg|glob|grep)$/i.test(toolName)) {
+  reason = getSearchPaths(toolArgs)
+    .map((relativePath) => isProtectedPath(relativePath, config) || isProtectedExistingPath(relativePath, config))
+    .find(Boolean) || null;
 } else if (/^(bash|powershell)$/i.test(toolName)) {
   reason = isDeniedCommand(toolArgs?.command || '', config);
 }
@@ -524,7 +813,7 @@ if (reason) {
 EOF
 
   write_file "${TARGET_DIR}/.agentic/hooks/protect-files-claude.mjs" <<'EOF'
-import { readStdin, loadHarnessConfig, parseHookInput, normalizePath, isProtectedPath, isDeniedCommand } from './harness-lib.mjs';
+import { readStdin, loadHarnessConfig, parseHookInput, getToolPaths, getSearchPaths, isProtectedPath, isProtectedExistingPath, isDeniedCommand } from './harness-lib.mjs';
 
 const raw = await readStdin();
 const payload = raw.trim() ? JSON.parse(raw) : {};
@@ -536,9 +825,14 @@ if (isCopilot) {
 }
 
 let reason = null;
-if (/^(Edit|Write|Read)$/i.test(toolName)) {
-  const relativePath = normalizePath(toolArgs?.file_path || toolArgs?.path || '');
-  reason = isProtectedPath(relativePath, config);
+if (/^(Edit|MultiEdit|Write|Read)$/i.test(toolName)) {
+  reason = getToolPaths(toolName, toolArgs)
+    .map((relativePath) => isProtectedPath(relativePath, config) || isProtectedExistingPath(relativePath, config))
+    .find(Boolean) || null;
+} else if (/^(Glob|Grep)$/i.test(toolName)) {
+  reason = getSearchPaths(toolArgs)
+    .map((relativePath) => isProtectedPath(relativePath, config) || isProtectedExistingPath(relativePath, config))
+    .find(Boolean) || null;
 } else if (/^Bash$/i.test(toolName)) {
   reason = isDeniedCommand(toolArgs?.command || '', config);
 }
@@ -550,12 +844,18 @@ if (reason) {
 EOF
 
   write_file "${TARGET_DIR}/.agentic/hooks/post-edit-check-copilot.mjs" <<'EOF'
-import { readStdin, loadHarnessConfig, runCommands, summarizeFailures } from './harness-lib.mjs';
+import { readStdin, loadHarnessConfig, parseHookInput, getToolPaths, getCommandPaths, selectPostEditCommands, runCommands, summarizeFailures } from './harness-lib.mjs';
 
 const raw = await readStdin();
-if (raw.trim()) JSON.parse(raw);
+const payload = raw.trim() ? JSON.parse(raw) : {};
+const { toolName, toolArgs, isClaude } = parseHookInput(payload);
+if (isClaude) process.exit(0);
+
 const config = loadHarnessConfig();
-const commands = config.postEditCommands || [];
+const relativePaths = /^(bash|powershell)$/i.test(toolName)
+  ? getCommandPaths(toolArgs?.command || '')
+  : getToolPaths(toolName, toolArgs);
+const commands = selectPostEditCommands(relativePaths, config);
 
 if (commands.length === 0) process.exit(0);
 
@@ -563,21 +863,26 @@ const results = runCommands(commands);
 const failureSummary = summarizeFailures(results);
 if (failureSummary) {
   process.stdout.write(JSON.stringify({
-    additionalContext: `Post-edit checks failed:\n${failureSummary}`,
+    additionalContext: `Post-edit checks failed${relativePaths.length ? ` for ${relativePaths.join(', ')}` : ''}:\n${failureSummary}`,
   }));
 }
 EOF
 
   write_file "${TARGET_DIR}/.agentic/hooks/post-edit-check-claude.mjs" <<'EOF'
-import { readStdin, loadHarnessConfig, runCommands, summarizeFailures } from './harness-lib.mjs';
+import { readStdin, loadHarnessConfig, parseHookInput, getToolPaths, getCommandPaths, selectPostEditCommands, runCommands, summarizeFailures } from './harness-lib.mjs';
 
 const raw = await readStdin();
 const payload = raw.trim() ? JSON.parse(raw) : {};
-if (payload?.toolName || payload?.toolArgs || payload?.sessionId) {
+const { toolName, toolArgs, isCopilot } = parseHookInput(payload);
+if (isCopilot) {
   process.exit(0);
 }
+
 const config = loadHarnessConfig();
-const commands = config.postEditCommands || [];
+const relativePaths = /^(bash|powershell)$/i.test(toolName)
+  ? getCommandPaths(toolArgs?.command || '')
+  : getToolPaths(toolName, toolArgs);
+const commands = selectPostEditCommands(relativePaths, config);
 
 if (commands.length === 0) process.exit(0);
 
@@ -587,7 +892,7 @@ if (failureSummary) {
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PostToolUse',
-      additionalContext: `Post-edit checks failed:\n${failureSummary}`,
+      additionalContext: `Post-edit checks failed${relativePaths.length ? ` for ${relativePaths.join(', ')}` : ''}:\n${failureSummary}`,
     },
   }));
 }
@@ -705,7 +1010,7 @@ EOF
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|Read|Bash",
+        "matcher": "Edit|MultiEdit|Write|Read|Glob|Grep|Bash",
         "hooks": [
           {
             "type": "command",
@@ -717,7 +1022,7 @@ EOF
 ,
     "PostToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "Edit|MultiEdit|Write",
         "hooks": [
           {
             "type": "command",
@@ -1022,7 +1327,7 @@ echo "  4. Ask your current coding agent to refine repo-specific details from th
 echo "  5. If the repo uses git, commit after reviewing the generated files"
 
 if [[ "$APPLY_INIT" == "1" ]]; then
-  node "${HOME}/.config/agentic-bootstrap/bin/apply-project-agentic-init.mjs" "${TARGET_DIR}"
+  node "${APPLY_INIT_SCRIPT}" "${TARGET_DIR}"
   echo
   echo "Applied PROJECT-AGENTIC-INIT.md to the generated harness."
 fi

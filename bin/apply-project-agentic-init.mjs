@@ -55,26 +55,32 @@ function parseKeyValueFields(section) {
 }
 
 function findSection(sections, titles) {
+  const available = [...sections.entries()];
   for (const title of titles) {
     if (sections.has(title)) return sections.get(title);
+    const match = available.find(([candidate]) => candidate.toLowerCase() === String(title).toLowerCase());
+    if (match) return match[1];
   }
   return '';
 }
 
 function getField(fields, keys) {
+  const entries = Object.entries(fields || {});
   for (const key of keys) {
     if (fields[key]) return fields[key];
+    const match = entries.find(([candidate]) => candidate.toLowerCase() === String(key).toLowerCase());
+    if (match && match[1]) return match[1];
   }
   return '';
 }
 
 function parseNestedList(section, label) {
   const lines = section.split('\n');
-  const target = `- ${label}:`;
+  const target = `- ${label}:`.toLowerCase();
   const items = [];
   let collecting = false;
   for (const line of lines) {
-    if (line.startsWith(target)) {
+    if (line.trimStart().toLowerCase() === target) {
       collecting = true;
       continue;
     }
@@ -102,7 +108,7 @@ function parseNestedListAny(section, labels) {
 function extractFencedBlock(section, headingLabel = null) {
   const source = headingLabel
     ? (() => {
-        const regex = new RegExp(`^###\\s+${headingLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'm');
+        const regex = new RegExp(`^###\\s+${headingLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'im');
         const match = regex.exec(section);
         return match ? section.slice(match.index + match[0].length) : '';
       })()
@@ -134,10 +140,26 @@ function stripWrappingBackticks(value) {
   return String(value || '').trim().replace(/^`+|`+$/g, '');
 }
 
+function isReviewPlaceholder(value) {
+  return /^(please review|bitte prüfen)\b/i.test(String(value || '').trim());
+}
+
 function isRepoPathPattern(value) {
   const normalized = stripWrappingBackticks(value);
-  if (!normalized || normalized.startsWith('~')) return false;
+  if (!normalized || normalized.startsWith('~') || /\s/.test(normalized)) return false;
   return normalized.startsWith('.') || normalized.startsWith('/') || normalized.includes('*') || normalized.endsWith('/');
+}
+
+function toMachinePathSpec(value) {
+  const normalized = stripWrappingBackticks(value).replace(/^\.\//, '').replace(/^\//, '').trim();
+  if (!isRepoPathPattern(normalized)) return null;
+  if (normalized.includes('*')) {
+    return { type: 'regex', value: globLikeToRegex(normalized) };
+  }
+  if (normalized.endsWith('/')) {
+    return { type: 'prefix', value: normalized };
+  }
+  return { type: 'exact', value: normalized };
 }
 
 function parseYesNo(value) {
@@ -169,10 +191,39 @@ function globLikeToRegex(glob) {
   return `^${regex}$`;
 }
 
+function looksLikeCommand(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return false;
+  return /^(?:git|npm|npx|pnpm|yarn|bun|bash|sh|node|python|python3|go|cargo|make|docker|docker-compose|vercel|gh)\b/.test(normalized)
+    || /^(?:\.\/|\/|~\/)/.test(normalized);
+}
+
+function extractGuardedCommand(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const fenced = raw.match(/^`([^`]+)`/);
+  if (fenced && looksLikeCommand(fenced[1])) {
+    return fenced[1].trim();
+  }
+
+  const normalized = stripWrappingBackticks(raw);
+  return looksLikeCommand(normalized) ? normalized : '';
+}
+
 function writeFile(relativePath, content) {
   const fullPath = path.join(projectDir, relativePath);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
   fs.writeFileSync(fullPath, content);
+}
+
+function writeJson(relativePath, value) {
+  writeFile(relativePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function removeFile(relativePath) {
+  const fullPath = path.join(projectDir, relativePath);
+  fs.rmSync(fullPath, { force: true });
 }
 
 const sections = parseSections(initText);
@@ -191,7 +242,8 @@ const stack = parseKeyValueFields(stackSection);
 const highRisk = parseKeyValueFields(highRiskSection);
 const languageRules = parseKeyValueFields(languageSection);
 const skillsFields = parseKeyValueFields(skillsSection);
-const extraSkills = parseNestedListAny(skillsSection, ['additional desired skills', 'zusätzliche Wunsch-Skills']);
+const extraSkills = parseNestedListAny(skillsSection, ['additional desired skills', 'zusätzliche Wunsch-Skills'])
+  .filter((item) => !isReviewPlaceholder(item));
 const hookWish = parseKeyValueFields(hookSection);
 
 const projectName = getField(overview, ['Project Name', 'Projektname']) || path.basename(projectDir);
@@ -241,28 +293,27 @@ const desiredSkills = [
   parseYesNo(getField(skillsFields, ['Surface Skill', 'Surface-Skill'])) === true ? 'surface' : null,
   parseYesNo(getField(skillsFields, ['Contract Skill', 'Contract-Skill'])) === true ? 'contracts' : null,
   ...extraSkills,
-].filter(Boolean);
+].filter((item) => item && !isReviewPlaceholder(item));
 
 const protectedPrefixes = [];
+const protectedExistingPrefixes = [];
 const protectedRegexes = ['^\\.env\\..+'];
 const protectedExactPaths = ['.env', '.env.local'];
 
-for (const item of [...protectedPaths, ...secretRules]) {
-  const normalized = item.replace(/^\.\//, '').replace(/^\//, '').trim();
-  if (!normalized) continue;
-  if (normalized.includes('*')) {
-    protectedRegexes.push(globLikeToRegex(normalized));
+for (const spec of [...protectedPaths, ...secretRules].map(toMachinePathSpec).filter(Boolean)) {
+  if (spec.type === 'regex') {
+    protectedRegexes.push(spec.value);
     continue;
   }
-  if (normalized.endsWith('/')) {
-    protectedPrefixes.push(normalized);
+  if (spec.type === 'prefix') {
+    protectedPrefixes.push(spec.value);
     continue;
   }
-  protectedExactPaths.push(normalized);
+  protectedExactPaths.push(spec.value);
 }
 
 if (dbRules.some((line) => /\bmigration/i.test(line) && !/\b(no migrations?|no database|keine migration|keine datenbank)\b/i.test(line))) {
-  protectedPrefixes.push('prisma/migrations/');
+  protectedExistingPrefixes.push('prisma/migrations/');
   protectedRegexes.push('^prisma/.*\\.db(-journal|-wal|-shm)?$');
 }
 
@@ -271,7 +322,9 @@ const deniedCommandRegexes = [
   '^rm -rf( .*)?$',
 ];
 for (const cmd of deployRules) {
-  deniedCommandRegexes.push(`^${escapeRegex(cmd)}( .*)?$`);
+  const guardedCommand = extractGuardedCommand(cmd);
+  if (!guardedCommand) continue;
+  deniedCommandRegexes.push(`^${escapeRegex(guardedCommand)}( .*)?$`);
 }
 
 const harness = {
@@ -283,6 +336,7 @@ const harness = {
   ].filter(Boolean),
   protectedExactPaths: Array.from(new Set(protectedExactPaths)),
   protectedPrefixes: Array.from(new Set(protectedPrefixes)),
+  protectedExistingPrefixes: Array.from(new Set(protectedExistingPrefixes)),
   protectedRegexes: Array.from(new Set(protectedRegexes)),
   deniedCommandRegexes: Array.from(new Set(deniedCommandRegexes)),
   postEditCommands: Array.from(new Set(postEditCommands)),
@@ -290,6 +344,85 @@ const harness = {
 };
 
 writeFile('.agentic/harness.json', `${JSON.stringify(harness, null, 2)}\n`);
+
+const hasPostEditChecks = postEditCommands.length > 0;
+const hasStopChecks = stopCommands.length > 0;
+
+if (hasPostEditChecks) {
+  writeJson('.github/hooks/post-edit-check.json', {
+    version: 1,
+    hooks: {
+      postToolUse: [
+        {
+          type: 'command',
+          command: 'node .agentic/hooks/post-edit-check-copilot.mjs',
+          cwd: '.',
+          timeoutSec: 120,
+        },
+      ],
+    },
+  });
+} else {
+  removeFile('.github/hooks/post-edit-check.json');
+}
+
+if (hasStopChecks) {
+  writeJson('.github/hooks/stop-verify.json', {
+    version: 1,
+    hooks: {
+      agentStop: [
+        {
+          type: 'command',
+          command: 'node .agentic/hooks/stop-verify-copilot.mjs',
+          cwd: '.',
+          timeoutSec: 300,
+        },
+      ],
+    },
+  });
+} else {
+  removeFile('.github/hooks/stop-verify.json');
+}
+
+const claudeSettingsPath = path.join(projectDir, '.claude/settings.json');
+if (fs.existsSync(claudeSettingsPath)) {
+  const claudeSettings = JSON.parse(fs.readFileSync(claudeSettingsPath, 'utf8'));
+  const hooks = claudeSettings.hooks || {};
+
+  if (hasPostEditChecks) {
+    hooks.PostToolUse = [
+      {
+        matcher: 'Edit|MultiEdit|Write',
+        hooks: [
+          {
+            type: 'command',
+            command: 'ROOT="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"; node "$ROOT/.agentic/hooks/post-edit-check-claude.mjs"',
+          },
+        ],
+      },
+    ];
+  } else {
+    delete hooks.PostToolUse;
+  }
+
+  if (hasStopChecks) {
+    hooks.Stop = [
+      {
+        hooks: [
+          {
+            type: 'command',
+            command: 'ROOT="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"; node "$ROOT/.agentic/hooks/stop-verify-claude.mjs"',
+          },
+        ],
+      },
+    ];
+  } else {
+    delete hooks.Stop;
+  }
+
+  claudeSettings.hooks = hooks;
+  writeJson('.claude/settings.json', claudeSettings);
+}
 
 const highRiskList = Object.entries(highRisk)
   .filter(([, value]) => value && value !== '-')
@@ -426,6 +559,7 @@ ${highRiskList.join('\n') || '- add from PROJECT-AGENTIC-INIT.md'}
 const protectedApplyTo = uniqueItems([
   ...protectedExactPaths,
   ...protectedPrefixes.map((item) => `${item}**`),
+  ...protectedExistingPrefixes.map((item) => `${item}**`),
   ...secretRules,
 ]
   .map((item) => stripWrappingBackticks(item).replace(/^\.\//, ''))

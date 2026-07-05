@@ -1,6 +1,7 @@
 .env
 .env.*.local
 .env.local
+/
 /.agentic/tmp/
 /.git/
 /.github/hooks/

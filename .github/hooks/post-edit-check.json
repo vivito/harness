@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "postToolUse": [
+      {
+        "type": "command",
+        "command": "node .agentic/hooks/post-edit-check-copilot.mjs",
+        "cwd": ".",
+        "timeoutSec": 120
+      }
+    ]
+  }
+}

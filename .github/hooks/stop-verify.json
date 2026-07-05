@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "agentStop": [
+      {
+        "type": "command",
+        "command": "node .agentic/hooks/stop-verify-copilot.mjs",
+        "cwd": ".",
+        "timeoutSec": 300
+      }
+    ]
+  }
+}
