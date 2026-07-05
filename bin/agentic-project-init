@@ -504,6 +504,14 @@ export function getCommandPaths(command) {
   ])];
 }
 
+function tokenizeShellWords(segment) {
+  return String(segment || '').match(/(?:[^\s"'`]+|"[^"]*"|'[^']*')+/g) || [];
+}
+
+function unquoteShellToken(token) {
+  return token.replace(/^['"`]+|['"`]+$/g, '');
+}
+
 function splitCommandSegments(command) {
   return String(command || '').split(/\s*(?:&&|\|\||\||;|\n)\s*/).filter(Boolean);
 }
@@ -548,6 +556,38 @@ function stripLeadingShellPrefixes(segment) {
 function extractNestedShellCommand(segment) {
   const match = segment.match(/^(?:\/?[^/\s]+\/)*(?:bash|sh)\b(?:\s+-[A-Za-z-]+\b)*\s+\$?(['"])([\s\S]*?)\1(?:\s+.*)?$/);
   return match ? match[2] : '';
+}
+
+function isGitPushSegment(segment) {
+  const tokens = tokenizeShellWords(stripLeadingShellPrefixes(segment)).map(unquoteShellToken);
+  if (tokens.length === 0) return false;
+
+  let index = 0;
+  if (!/(?:^|\/)git$/.test(tokens[index])) return false;
+  index += 1;
+
+  while (index < tokens.length) {
+    const token = tokens[index];
+    if (token === '--') {
+      index += 1;
+      break;
+    }
+    if (['-c', '-C', '--exec-path', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env'].includes(token)) {
+      index += 2;
+      continue;
+    }
+    if (/^--(?:exec-path|git-dir|work-tree|namespace|super-prefix|config-env)=/.test(token)) {
+      index += 1;
+      continue;
+    }
+    if (token.startsWith('-') && token !== '-') {
+      index += 1;
+      continue;
+    }
+    return token === 'push';
+  }
+
+  return index < tokens.length && tokens[index] === 'push';
 }
 
 function isDirectInlineInterpreterSegment(segment) {
@@ -655,6 +695,10 @@ export function isDeniedCommand(command, config) {
 
   for (const segment of segments) {
     const strippedSegment = stripLeadingShellPrefixes(segment);
+    if (isGitPushSegment(strippedSegment)) {
+      return 'Command is blocked by policy (git push).';
+    }
+
     for (const source of config.deniedCommandRegexes || []) {
       const regex = new RegExp(source);
       if (regex.test(segment) || regex.test(strippedSegment)) {

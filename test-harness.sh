@@ -161,6 +161,28 @@ if [[ -f ".agentic/hooks/protect-files-claude.mjs" ]]; then
   fi
 fi
 
+if [[ -f ".agentic/hooks/protect-files-copilot.mjs" ]]; then
+  result="$(printf '{"toolName":"bash","toolArgs":{"command":"git -C /tmp push origin main"}}' | node .agentic/hooks/protect-files-copilot.mjs 2>/dev/null || true)"
+  if echo "$result" | grep -q '"permissionDecision":"deny"'; then
+    pass "Copilot protect-files hook denies git -C push commands"
+  else
+    fail "Copilot protect-files hook did not deny git -C push commands"
+  fi
+fi
+
+if [[ -f ".agentic/hooks/protect-files-claude.mjs" ]]; then
+  if printf '{"tool_name":"Bash","tool_input":{"command":"git -C /tmp push origin main"}}' | node .agentic/hooks/protect-files-claude.mjs >/dev/null 2>&1; then
+    fail "Claude protect-files hook did not deny git -C push commands"
+  else
+    status=$?
+    if [[ "$status" -eq 2 ]]; then
+      pass "Claude protect-files hook denies git -C push commands"
+    else
+      fail "Claude protect-files hook failed with unexpected exit code $status for git -C push"
+    fi
+  fi
+fi
+
 if [[ -f ".agentic/hooks/stop-verify.mjs" ]]; then
   if output="$(node .agentic/hooks/stop-verify.mjs --dry-run 2>/dev/null)"; then
     if echo "$output" | grep -q '"commands"'; then
