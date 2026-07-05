@@ -384,6 +384,29 @@ EOF
   "protectedExistingPrefixes": ${protected_existing_prefixes_json},
   "protectedRegexes": ${protected_regexes_json},
   "deniedCommandRegexes": ${denied_commands_json},
+  "toolingPreferences": {
+    "debugging": {
+      "skill": "systematic-debugging",
+      "repoLocalSkillPath": ".agents/skills/systematic-debugging",
+      "requiredForBugs": true,
+      "requiredForUnexpectedBehavior": true,
+      "requiredForFailingTests": true
+    },
+    "completion": {
+      "skill": "verification-before-completion",
+      "repoLocalSkillPath": ".agents/skills/verification-before-completion",
+      "requiredBeforeSuccessClaims": true,
+      "verificationPolicy": "fresh-smallest-credible-command"
+    },
+    "review": {
+      "skill": "requesting-code-review",
+      "repoLocalSkillPath": ".agents/skills/requesting-code-review",
+      "primaryAgent": "project-reviewer",
+      "securityAgent": "security-review",
+      "requiredForNonTrivialChanges": true,
+      "requiredForHighRiskChanges": true
+    }
+  },
   "postEditCommands": ${post_edit_json},
   "stopCommands": ${stop_commands_json}
 }
@@ -1294,6 +1317,160 @@ description: Checklist for contract-sensitive work in this repository. Use when 
    - affected contracts
    - likely downstream surfaces
    - recommended validation
+EOF
+
+  write_file "${TARGET_DIR}/.agents/skills/systematic-debugging/SKILL.md" <<'EOF'
+---
+description: Use for bugs, failing tests, and unexpected behavior in this repository before proposing or implementing fixes.
+---
+
+# Systematic Debugging
+
+Use this skill whenever behavior is broken, unclear, or surprising. The goal is to find the root cause before changing code.
+
+## Core rule
+
+**No fixes before root-cause analysis.**
+
+Symptom fixes are not enough, especially around auth, routing, deployment, migrations, external integrations, and other contract-sensitive flows.
+
+## Required flow
+
+1. **Reproduce clearly**
+   - What failed?
+   - How can it be triggered again?
+   - Which command, route, interaction, or payload shows the issue?
+
+2. **Read the evidence first**
+   - Error message, stack trace, failing assertion, HTTP response, or visible broken behavior
+   - Recent changes in the touched area
+   - Existing validation or contract checks already available in the repo
+
+3. **Trace the failing path**
+   - Follow the value or control flow backward to the first bad input or wrong decision
+   - For multi-layer issues, inspect each boundary explicitly
+   - For library or framework uncertainty, prefer version-specific docs before guessing
+
+4. **Compare with a known-good path**
+   - Find nearby working code, tests, or similar flows in the repo
+   - Identify the concrete difference instead of assuming
+
+5. **Form one hypothesis**
+   - State the most likely root cause
+   - Make the smallest possible change to test that hypothesis
+
+6. **Verify the fix**
+   - Run the smallest credible command that proves the issue is fixed
+   - If the first fix fails, go back to the evidence; do not stack random changes
+
+## Repo-local reminders
+
+- If the issue touches high-risk or contract-sensitive surfaces, also apply `project-contracts`.
+- If the fix becomes non-trivial, route the result through `requesting-code-review` before concluding.
+
+## Anti-patterns
+
+- "Quick fix for now"
+- Multiple speculative changes in one pass
+- Treating a green build as proof without reproducing the original symptom
+- Declaring success before fresh verification output
+EOF
+
+  write_file "${TARGET_DIR}/.agents/skills/verification-before-completion/SKILL.md" <<'EOF'
+---
+description: Use before claiming work is done, fixed, or passing in this repository.
+---
+
+# Verification Before Completion
+
+Use this skill immediately before any success claim, completion statement, handoff, or commit-ready conclusion.
+
+## Core rule
+
+**No success claims without fresh verification evidence.**
+
+If you have not just run the command that proves the claim, you cannot honestly claim the work is done.
+
+## Required flow
+
+1. **State the claim**
+   - Example: "the bug is fixed", "the build passes", "the change is ready"
+
+2. **Choose the smallest credible proof**
+   - For harness, skill, or docs changes: use the smallest existing command that proves the edited surface still works
+   - For route, contract, or behavior changes: use the most targeted command that truly covers the claim
+   - Prefer `project-verify` guidance when the repo already has it
+
+3. **Run the command fresh**
+   - Do not rely on an earlier run
+   - Read the actual output and exit status
+
+4. **Compare output to the claim**
+   - If it proves the claim, report success plainly
+   - If it does not, report the actual state instead of optimistic wording
+
+## Repo-local reminders
+
+- For high-risk surfaces, verification is not optional just because the change looks small.
+- If the change is non-trivial, pair this skill with `requesting-code-review`.
+
+## Anti-patterns
+
+- "Should work now"
+- "Looks good"
+- Reusing stale command output
+- Claiming a bug is fixed without checking the original failing path
+- Treating agent output as proof without independent verification
+EOF
+
+  write_file "${TARGET_DIR}/.agents/skills/requesting-code-review/SKILL.md" <<'EOF'
+---
+description: Use for non-trivial changes before concluding, so the right review agent checks the result.
+---
+
+# Requesting Code Review
+
+Use this skill when a change is large enough, risky enough, or cross-cutting enough that it should not rely on self-review alone.
+
+## When this is required
+
+Run a review gate when the change is:
+
+- non-trivial in logic or scope
+- cross-file or cross-surface
+- contract-sensitive
+- security-relevant or data-sensitive
+
+Tiny copy tweaks or narrowly scoped docs-only edits can skip this if there is no meaningful review surface.
+
+## Review routing
+
+1. **Default reviewer:** `project-reviewer`
+   - Use for most non-trivial repo changes
+
+2. **Security reviewer:** `security-review`
+   - Add when the change is plausibly security-sensitive
+
+## What to give the reviewer
+
+Provide concise, complete context:
+
+- what changed
+- what requirement or bug it addresses
+- which files or surfaces matter most
+- which validation was already run
+- any known trade-offs or open questions
+
+## After review
+
+- Fix high-signal findings before concluding
+- If a finding is wrong, answer it with concrete reasoning and evidence
+- Do not treat "tests pass" as a substitute for review on non-trivial work
+
+## Repo-local reminders
+
+- Pair this skill with `verification-before-completion`; review does not replace verification.
+- For bugs or regressions, use `systematic-debugging` first, then review the resulting fix if it is non-trivial.
 EOF
   create_dir_link_or_copy "${TARGET_DIR}/.agents/skills" "${TARGET_DIR}/.claude/skills"
 fi

@@ -93,7 +93,9 @@ Use PROJECT-AGENTIC-INIT.md and set up the agentic environment for this project.
 - Surface Skill: yes / no
 - Contract Skill: yes / no
 - additional desired skills:
-  - 
+  - systematic-debugging
+  - verification-before-completion
+  - requesting-code-review
 
 ## 9. Desired Output
 

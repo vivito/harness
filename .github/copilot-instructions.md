@@ -6,6 +6,9 @@ Read `AGENTS.md` first. It is the canonical shared contract for this repository.
 
 - Keep `PROJECT-AGENTIC-INIT.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `docs/agentic-eval-pack.md` aligned when the setup changes.
 - Respect the technical enforcement layer in `.github/hooks/*.json`, `.github/instructions/**/*.instructions.md`, and `.agentic/harness.json`.
+- For bugs, failing tests, or surprising behavior, use a root-cause-first flow and the repo-local `systematic-debugging` skill.
+- Before claiming success, use fresh verification evidence; prefer the repo-local `verification-before-completion` skill over stale assumptions.
+- For non-trivial or high-risk changes, run a review gate via `requesting-code-review` before concluding.
 - Never run human-gated deployment commands without explicit approval.
 - Default to the smallest credible validation, using the stop-gate commands from the project contract.
 

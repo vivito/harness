@@ -107,19 +107,29 @@ Which project skills would be useful?
 - Surface Skill: yes / no
 - Contract Skill: yes / no
 - additional desired skills:
-  - 
+  - systematic-debugging
+  - verification-before-completion
+  - requesting-code-review
 
 ## 9. Desired Output
 
 The bootstrap should create, where possible:
 
+- `AGENTS.md`
 - `CLAUDE.md`
+- `GEMINI.md`
+- `.github/copilot-instructions.md`
+- `.github/instructions/**/*.instructions.md`
+- `.github/hooks/*.json`
 - `.claudeignore`
+- `.agentic/harness.json`
+- `.agentic/hooks/`
 - `.claude/settings.json`
-- `.claude/hooks/`
 - `.claude/agents/`
-- `.claude/skills/`
+- `.agents/skills/`
+- `.claude/skills/` (optional adapter)
 - `docs/agentic-eval-pack.md`
+- `test-harness.sh`
 
 If something here does not make sense, the agent should explain it instead of creating it blindly.
 

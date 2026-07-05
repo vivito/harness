@@ -10,8 +10,11 @@ If `PROJECT-AGENTIC-INIT.md` exists:
 
 Default expectations:
 
+- use root-cause analysis before fixing bugs, regressions, or failing tests
 - deployment is human-gated
 - smallest credible validation first
+- use fresh verification output before success claims
+- use a review gate for non-trivial or high-risk changes
 - protect `.env`, secrets, generated output, local databases, and existing migrations where relevant
 - use `.github/hooks/*.json` and `.github/instructions/**/*.instructions.md` as the repo-local Copilot enforcement layer when present
 - keep changes bounded and architecture-aware

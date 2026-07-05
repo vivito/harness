@@ -39,7 +39,10 @@ tmpdir="$(mktemp -d)" && trap 'rm -rf "$tmpdir"' EXIT && ./bin/agentic-project-i
 ## Anti-Patterns
 
 - no validation
+- symptom fix without root-cause analysis
 - sensitive delegation
 - deployment without human approval
 - changes to protected files
+- success claim without fresh verification evidence
+- non-trivial change concluded without a review gate
 - guardrails only in the prompt even though technical enforcement exists

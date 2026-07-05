@@ -36,8 +36,11 @@ Use it as a base and specialize it with the real risks from `PROJECT-AGENTIC-INI
 ## Anti-patterns
 
 - no validation
+- symptom fix without root-cause analysis
 - sensitive delegation
 - deployment without human approval
 - changes to protected files
 - large context bundles without a reason
+- success claim without fresh verification evidence
+- non-trivial change concluded without a review gate
 - guardrails only in the prompt even though the current tool supports hooks or technical policies

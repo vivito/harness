@@ -17,6 +17,14 @@ Goals:
 
 ```text
 harness/
+├── .agents/
+│   └── skills/
+│       ├── project-contracts/
+│       ├── project-deploy/
+│       ├── project-verify/
+│       ├── systematic-debugging/
+│       ├── verification-before-completion/
+│       └── requesting-code-review/
 ├── bin/
 │   ├── agentic-project-init
 │   └── apply-project-agentic-init.mjs
@@ -94,6 +102,12 @@ Then apply `PROJECT-AGENTIC-INIT.md`:
 agentic-project-init . --apply-init --force
 ./test-harness.sh
 ```
+
+## Baseline repo-local skills
+
+- `project-verify`, `project-deploy`, and `project-contracts` remain the generic control-plane skills.
+- `systematic-debugging`, `verification-before-completion`, and `requesting-code-review` form the default workflow baseline for most repos.
+- Add stack-specific skills on top; do not replace this shared baseline with repo-specific reviewer names in Harness itself.
 
 ## Architecture principles
 

@@ -131,6 +131,13 @@ else
   fail "Missing canonical .agents/skills directory"
 fi
 
+require_path ".agents/skills/project-verify/SKILL.md"
+require_path ".agents/skills/project-deploy/SKILL.md"
+require_path ".agents/skills/project-contracts/SKILL.md"
+require_path ".agents/skills/systematic-debugging/SKILL.md"
+require_path ".agents/skills/verification-before-completion/SKILL.md"
+require_path ".agents/skills/requesting-code-review/SKILL.md"
+
 if [[ -L ".claude/skills" ]]; then
   pass ".claude/skills adapter is a symlink"
 elif [[ -d ".claude/skills" ]]; then

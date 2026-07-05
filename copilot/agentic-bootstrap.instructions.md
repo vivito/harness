@@ -10,6 +10,7 @@ If a repository contains `PROJECT-AGENTIC-INIT.md`, treat it as the bootstrap co
 4. If `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, or `docs/agentic-eval-pack.md` are still generic starter files, refine them from the project contract and the repo itself.
 5. If `.github/hooks/*.json`, `.github/instructions/**/*.instructions.md`, `.claude/settings.json`, `.agentic/harness.json`, `.agentic/hooks/`, or `.agents/skills/` exist, treat them as the technical guardrail layer and keep them aligned with the project contract.
 6. Treat `.agents/skills/` as the canonical repo-local skill source. If `.claude/skills/` exists, it should usually be an adapter to that directory.
+   - When repo-local skills are scaffolded, prefer a small baseline for debugging, fresh verification, and review gating before adding stack-specific extras.
 7. Do not overwrite mature project-specific instructions blindly; merge carefully and stop on ambiguity.
 8. Keep deployment human-gated.
 9. Prefer the smallest credible validation.

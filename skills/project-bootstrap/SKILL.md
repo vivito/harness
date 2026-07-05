@@ -65,9 +65,15 @@ Bootstrap the smallest coherent set that fits the repo:
 10. `.agentic/hooks/*`
 11. `.claude/agents/<repo>-fast-worker.md`
 12. `.claude/agents/<repo>-reviewer.md`
-13. `.claude/skills/<repo>-verify/SKILL.md`
-14. 1-2 additional repo-specific skills
-15. `docs/agentic-eval-pack.md` or `agentic-eval-pack.md` if the repo has no `docs/` folder
+13. `.agents/skills/project-verify/SKILL.md`
+14. `.agents/skills/project-deploy/SKILL.md`
+15. `.agents/skills/project-contracts/SKILL.md`
+16. `.agents/skills/systematic-debugging/SKILL.md`
+17. `.agents/skills/verification-before-completion/SKILL.md`
+18. `.agents/skills/requesting-code-review/SKILL.md`
+19. `.claude/skills/` adapter when the repo supports it
+20. extra stack-specific skills only when they add real leverage
+21. `docs/agentic-eval-pack.md` or `agentic-eval-pack.md` if the repo has no `docs/` folder
 
 ## Bootstrap rules
 
@@ -133,6 +139,7 @@ If no credible post-edit hook or stop-gate exists, explicitly say so in the resu
 
 Different repos need different overlays:
 
+- most repos: debugging, fresh verification, and review-gate skills as a baseline
 - static or Vite sites: surface/entry-point skills
 - Next.js apps: route/auth/data-contract skills
 - Prisma repos: migration and schema guardrails
@@ -163,10 +170,13 @@ Never commit or push a scaffold that has no verification gate unless you explici
 
 Prefer stable, generic names inside the project:
 
-- `<project>-verify`
-- `<project>-deploy`
-- `<project>-surface`
-- `<project>-contracts`
+- `project-verify`
+- `project-deploy`
+- `project-contracts`
+- `systematic-debugging`
+- `verification-before-completion`
+- `requesting-code-review`
+- `<project>-surface` or other stack-specific skill names only when the repo truly needs them
 
 Use short names only if they are clearly project-specific and unlikely to collide.
 

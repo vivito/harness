@@ -15,6 +15,12 @@ This file is the **canonical** instruction file for this project.
 - **Short description:** Versioned, tool-neutral agentic harness for new or inherited software projects. This repository contains the canonical sources for the bootstrap command `agentic-project-init`, the `PROJECT-AGENTIC-INIT.md` template, shared instruction templates, and the global bootstrap skill.
 - **Customer type / context:** Meta/tooling repository for repo bootstrap and agentic guardrails; not a classic end-user product.
 
+## Workflow defaults
+
+- For bugs, regressions, or failing tests, establish the root cause before changing code.
+- Before any success claim or handoff, run the smallest fresh verification that proves the claim.
+- For non-trivial or high-risk changes, route the result through a review gate before concluding.
+
 
 ## Stack
 
@@ -131,3 +137,6 @@ tmpdir="$(mktemp -d)" && trap 'rm -rf "$tmpdir"' EXIT && ./bin/agentic-project-i
 - verify
 - deploy
 - contracts
+- systematic-debugging
+- verification-before-completion
+- requesting-code-review

@@ -15,8 +15,11 @@ If `PROJECT-AGENTIC-INIT.md` exists, it is the primary source for:
 
 - Architecture, privacy, and final decisions stay in the trusted main lane.
 - Bounded, clearly scoped tasks may be delegated to cheaper worker lanes.
+- For bugs, regressions, and failing tests, establish the root cause before changing code.
 - Deployment remains human-gated.
 - Always run the smallest appropriate validation before finishing.
+- Before any success claim or handoff, use fresh verification output.
+- For non-trivial or high-risk changes, route the result through a review gate before concluding.
 - After a stable result, commit and push if the project uses Git.
 
 ## Bootstrap rule

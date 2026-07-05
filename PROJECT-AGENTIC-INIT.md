@@ -130,7 +130,9 @@ tmpdir="$(mktemp -d)" && trap 'rm -rf "$tmpdir"' EXIT && ./bin/agentic-project-i
 - Surface Skill: please review
 - Contract Skill: yes
 - additional desired skills:
-  - please review: no additional add-on skills can be derived confidently from the repository today
+  - systematic-debugging
+  - verification-before-completion
+  - requesting-code-review
 
 ## 9. Desired Output
 

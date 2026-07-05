@@ -37,9 +37,10 @@ Please set up CLAUDE.md, .claude/, skills, subagents, and a small eval pack for 
 
 ## What the skill should produce
 
-- repo-local agent files
+- repo-local agent files and shared contract files
 - protection hooks
 - post-edit and stop hooks when they make sense
-- verify / deploy / surface / contract skills depending on the stack
+- project-verify / project-deploy / project-contracts plus systematic-debugging / verification-before-completion / requesting-code-review as the default baseline
+- surface or other stack-specific skills depending on the stack
 - eval pack
 - no blind overwriting of existing repo instructions

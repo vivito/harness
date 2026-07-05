@@ -294,6 +294,7 @@ const desiredSkills = [
   parseYesNo(getField(skillsFields, ['Contract Skill', 'Contract-Skill'])) === true ? 'contracts' : null,
   ...extraSkills,
 ].filter((item) => item && !isReviewPlaceholder(item));
+const desiredSkillSet = new Set(desiredSkills.map((item) => String(item).trim().toLowerCase()));
 
 const protectedPrefixes = [];
 const protectedExistingPrefixes = [];
@@ -327,6 +328,35 @@ for (const cmd of deployRules) {
   deniedCommandRegexes.push(`^${escapeRegex(guardedCommand)}( .*)?$`);
 }
 
+const toolingPreferences = {};
+if (desiredSkillSet.has('systematic-debugging')) {
+  toolingPreferences.debugging = {
+    skill: 'systematic-debugging',
+    repoLocalSkillPath: '.agents/skills/systematic-debugging',
+    requiredForBugs: true,
+    requiredForUnexpectedBehavior: true,
+    requiredForFailingTests: true,
+  };
+}
+if (desiredSkillSet.has('verification-before-completion')) {
+  toolingPreferences.completion = {
+    skill: 'verification-before-completion',
+    repoLocalSkillPath: '.agents/skills/verification-before-completion',
+    requiredBeforeSuccessClaims: true,
+    verificationPolicy: 'fresh-smallest-credible-command',
+  };
+}
+if (desiredSkillSet.has('requesting-code-review')) {
+  toolingPreferences.review = {
+    skill: 'requesting-code-review',
+    repoLocalSkillPath: '.agents/skills/requesting-code-review',
+    primaryAgent: 'project-reviewer',
+    securityAgent: 'security-review',
+    requiredForNonTrivialChanges: true,
+    requiredForHighRiskChanges: true,
+  };
+}
+
 const harness = {
   projectName,
   stackTags: [
@@ -342,6 +372,9 @@ const harness = {
   postEditCommands: Array.from(new Set(postEditCommands)),
   stopCommands: Array.from(new Set(stopCommands)),
 };
+if (Object.keys(toolingPreferences).length > 0) {
+  harness.toolingPreferences = toolingPreferences;
+}
 
 writeFile('.agentic/harness.json', `${JSON.stringify(harness, null, 2)}\n`);
 
@@ -450,6 +483,12 @@ This file is the **canonical** instruction file for this project.
 - **Customer type / context:** ${customerContext}
 ${goals.length ? goals.map((goal) => `- **Goal:** ${goal}`).join('\n') : ''}
 
+## Workflow defaults
+
+- For bugs, regressions, or failing tests, establish the root cause before changing code.
+- Before any success claim or handoff, run the smallest fresh verification that proves the claim.
+- For non-trivial or high-risk changes, route the result through a review gate before concluding.
+
 ## Stack
 
 - **Framework / Runtime:** ${frameworkRuntime}
@@ -540,6 +579,9 @@ Read \`AGENTS.md\` first. It is the canonical shared contract for this repositor
 
 - Keep \`PROJECT-AGENTIC-INIT.md\`, \`AGENTS.md\`, \`CLAUDE.md\`, \`GEMINI.md\`, and \`docs/agentic-eval-pack.md\` aligned when the setup changes.
 - Respect the technical enforcement layer in \`.github/hooks/*.json\`, \`.github/instructions/**/*.instructions.md\`, and \`.agentic/harness.json\`.
+- For bugs, failing tests, or surprising behavior, use a root-cause-first flow and the repo-local \`systematic-debugging\` skill.
+- Before claiming success, use fresh verification evidence; prefer the repo-local \`verification-before-completion\` skill over stale assumptions.
+- For non-trivial or high-risk changes, run a review gate via \`requesting-code-review\` before concluding.
 - Never run human-gated deployment commands without explicit approval.
 - Default to the smallest credible validation, using the stop-gate commands from the project contract.
 
@@ -631,9 +673,12 @@ ${highRiskList.join('\n') || '- add from PROJECT-AGENTIC-INIT.md'}
 ## Anti-Patterns
 
 - no validation
+- symptom fix without root-cause analysis
 - sensitive delegation
 - deployment without human approval
 - changes to protected files
+- success claim without fresh verification evidence
+- non-trivial change concluded without a review gate
 - guardrails only in the prompt even though technical enforcement exists
 `
 );
