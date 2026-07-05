@@ -66,7 +66,29 @@ In a new project:
 agentic-project-init .
 ```
 
-Then fill out and apply `PROJECT-AGENTIC-INIT.md`:
+Then ask your agent to prefill `PROJECT-AGENTIC-INIT.md` with a usable first draft:
+
+```text
+Read this repository and prefill PROJECT-AGENTIC-INIT.md as completely as possible.
+
+Derive everything from the existing code, README, package.json, deployment scripts, and existing project files.
+Do not invent anything speculative: if something cannot be derived confidently from the repository, mark it clearly as "please review" instead of making it up.
+Pay special attention to:
+- tech stack
+- important commands
+- cheap post-edit checks
+- hard stop gates
+- guardrails
+- high-risk surfaces
+- architecture rules
+- language and copy rules
+- sensible skills
+- hook preferences
+
+In this step, edit only PROJECT-AGENTIC-INIT.md and nothing else. The goal is a usable draft, not perfection. It is better to leave gaps marked "please review" than to create false confidence.
+```
+
+Then apply `PROJECT-AGENTIC-INIT.md`:
 
 ```bash
 agentic-project-init . --apply-init --force
