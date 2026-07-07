@@ -130,6 +130,8 @@ tmpdir="$(mktemp -d)" && trap 'rm -rf "$tmpdir"' EXIT && ./bin/agentic-project-i
 - Surface Skill: please review
 - Contract Skill: yes
 - additional desired skills:
+  -
+- optional workflow checklist skills (only add them if the repo wants explicit extra lanes despite the added latency):
   - systematic-debugging
   - verification-before-completion
   - requesting-code-review

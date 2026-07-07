@@ -21,10 +21,7 @@ harness/
 │   └── skills/
 │       ├── project-contracts/
 │       ├── project-deploy/
-│       ├── project-verify/
-│       ├── systematic-debugging/
-│       ├── verification-before-completion/
-│       └── requesting-code-review/
+│       └── project-verify/
 ├── bin/
 │   ├── agentic-project-init
 │   └── apply-project-agentic-init.mjs
@@ -106,8 +103,8 @@ agentic-project-init . --apply-init --force
 ## Baseline repo-local skills
 
 - `project-verify`, `project-deploy`, and `project-contracts` remain the generic control-plane skills.
-- `systematic-debugging`, `verification-before-completion`, and `requesting-code-review` form the default workflow baseline for most repos.
-- Add stack-specific skills on top; do not replace this shared baseline with repo-specific reviewer names in Harness itself.
+- Add workflow checklist skills such as `systematic-debugging`, `verification-before-completion`, and `requesting-code-review` only when a repo benefits from the extra ceremony more than the added latency.
+- Add stack-specific skills on top; do not replace the shared baseline with repo-specific reviewer names in Harness itself.
 
 ## Architecture principles
 

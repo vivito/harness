@@ -76,6 +76,18 @@ process.exit(Array.isArray(data.stopCommands) && data.stopCommands.length > 0 ? 
 NODE
 }
 
+harness_requires_workflow_skill() {
+  local skill_name="$1"
+  node - "$skill_name" <<'NODE' >/dev/null 2>&1
+const fs = require('node:fs');
+const skill = process.argv[2];
+const data = JSON.parse(fs.readFileSync('.agentic/harness.json', 'utf8'));
+const tooling = data.toolingPreferences || {};
+const enabled = Object.values(tooling).some((entry) => entry && entry.skill === skill);
+process.exit(enabled ? 0 : 1);
+NODE
+}
+
 echo "== Agentic Harness Check =="
 echo "Root: $ROOT_DIR"
 echo
@@ -134,9 +146,14 @@ fi
 require_path ".agents/skills/project-verify/SKILL.md"
 require_path ".agents/skills/project-deploy/SKILL.md"
 require_path ".agents/skills/project-contracts/SKILL.md"
-require_path ".agents/skills/systematic-debugging/SKILL.md"
-require_path ".agents/skills/verification-before-completion/SKILL.md"
-require_path ".agents/skills/requesting-code-review/SKILL.md"
+
+for skill in systematic-debugging verification-before-completion requesting-code-review; do
+  if harness_requires_workflow_skill "$skill"; then
+    require_path ".agents/skills/$skill/SKILL.md"
+  else
+    pass "Workflow skill $skill is not enabled in .agentic/harness.json"
+  fi
+done
 
 if [[ -L ".claude/skills" ]]; then
   pass ".claude/skills adapter is a symlink"

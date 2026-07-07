@@ -20,29 +20,6 @@
     "^rm -rf( .*)?$",
     "^bash install\\.sh( .*)?$"
   ],
-  "toolingPreferences": {
-    "debugging": {
-      "skill": "systematic-debugging",
-      "repoLocalSkillPath": ".agents/skills/systematic-debugging",
-      "requiredForBugs": true,
-      "requiredForUnexpectedBehavior": true,
-      "requiredForFailingTests": true
-    },
-    "completion": {
-      "skill": "verification-before-completion",
-      "repoLocalSkillPath": ".agents/skills/verification-before-completion",
-      "requiredBeforeSuccessClaims": true,
-      "verificationPolicy": "fresh-smallest-credible-command"
-    },
-    "review": {
-      "skill": "requesting-code-review",
-      "repoLocalSkillPath": ".agents/skills/requesting-code-review",
-      "primaryAgent": "project-reviewer",
-      "securityAgent": "security-review",
-      "requiredForNonTrivialChanges": true,
-      "requiredForHighRiskChanges": true
-    }
-  },
   "postEditCommands": [
     "bash -n install.sh bin/agentic-project-init templates/test-harness.sh",
     "node --check bin/apply-project-agentic-init.mjs",

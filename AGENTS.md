@@ -20,6 +20,7 @@ This file is the **canonical** instruction file for this project.
 - For bugs, regressions, or failing tests, establish the root cause before changing code.
 - Before any success claim or handoff, run the smallest fresh verification that proves the claim.
 - For non-trivial or high-risk changes, route the result through a review gate before concluding.
+- Keep the default workflow lean; only add dedicated debugging, verification, or review checklist skills when a repo explicitly benefits from the extra latency.
 
 
 ## Stack
@@ -137,6 +138,5 @@ tmpdir="$(mktemp -d)" && trap 'rm -rf "$tmpdir"' EXIT && ./bin/agentic-project-i
 - verify
 - deploy
 - contracts
-- systematic-debugging
-- verification-before-completion
-- requesting-code-review
+
+Optional workflow checklist skills such as `systematic-debugging`, `verification-before-completion`, and `requesting-code-review` stay opt-in here to keep the default skill surface fast.

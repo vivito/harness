@@ -107,6 +107,8 @@ Which project skills would be useful?
 - Surface Skill: yes / no
 - Contract Skill: yes / no
 - additional desired skills:
+  -
+- optional workflow checklist skills (only add them if the repo wants explicit extra lanes despite the added latency):
   - systematic-debugging
   - verification-before-completion
   - requesting-code-review

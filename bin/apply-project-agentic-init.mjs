@@ -226,6 +226,11 @@ function removeFile(relativePath) {
   fs.rmSync(fullPath, { force: true });
 }
 
+function removePath(relativePath) {
+  const fullPath = path.join(projectDir, relativePath);
+  fs.rmSync(fullPath, { recursive: true, force: true });
+}
+
 const sections = parseSections(initText);
 const overviewSection = findSection(sections, ['Project Overview', 'Projektüberblick']);
 const stackSection = findSection(sections, ['Tech Stack']);
@@ -462,6 +467,15 @@ const highRiskList = Object.entries(highRisk)
   .map(([key, value]) => `- **${key}:** ${value}`);
 
 const skillBullets = desiredSkills.map((skill) => `- ${skill}`);
+const debuggingGuidance = desiredSkillSet.has('systematic-debugging')
+  ? '- For bugs, failing tests, or surprising behavior, use a root-cause-first flow before changing code; the repo-local `systematic-debugging` skill is available when you want an explicit checklist.'
+  : '- For bugs, failing tests, or surprising behavior, use a root-cause-first flow before changing code.';
+const completionGuidance = desiredSkillSet.has('verification-before-completion')
+  ? '- Before claiming success, use fresh verification evidence from the smallest credible command; the repo-local `verification-before-completion` skill is available when you want an explicit pre-handoff checklist.'
+  : '- Before claiming success, use fresh verification evidence from the smallest credible command.';
+const reviewGuidance = desiredSkillSet.has('requesting-code-review')
+  ? '- For non-trivial or high-risk changes, run an appropriate review gate before concluding; the repo-local `requesting-code-review` skill is available when you want explicit review routing.'
+  : '- For non-trivial or high-risk changes, run an appropriate review gate before concluding.';
 
 writeFile(
   'AGENTS.md',
@@ -579,9 +593,10 @@ Read \`AGENTS.md\` first. It is the canonical shared contract for this repositor
 
 - Keep \`PROJECT-AGENTIC-INIT.md\`, \`AGENTS.md\`, \`CLAUDE.md\`, \`GEMINI.md\`, and \`docs/agentic-eval-pack.md\` aligned when the setup changes.
 - Respect the technical enforcement layer in \`.github/hooks/*.json\`, \`.github/instructions/**/*.instructions.md\`, and \`.agentic/harness.json\`.
-- For bugs, failing tests, or surprising behavior, use a root-cause-first flow and the repo-local \`systematic-debugging\` skill.
-- Before claiming success, use fresh verification evidence; prefer the repo-local \`verification-before-completion\` skill over stale assumptions.
-- For non-trivial or high-risk changes, run a review gate via \`requesting-code-review\` before concluding.
+- ${debuggingGuidance.slice(2)}
+- ${completionGuidance.slice(2)}
+- ${reviewGuidance.slice(2)}
+- Keep the default workflow lean; only add repo-local checklist skills when the repository explicitly benefits from the extra ceremony.
 - Never run human-gated deployment commands without explicit approval.
 - Default to the smallest credible validation, using the stop-gate commands from the project contract.
 
@@ -836,6 +851,178 @@ ${highRiskList.join('\n') || '- add from PROJECT-AGENTIC-INIT.md'}
    - recommended validation
 `
   );
+}
+
+if (desiredSkillSet.has('systematic-debugging')) {
+  writeFile(
+    '.agents/skills/systematic-debugging/SKILL.md',
+    `---
+description: Structured root-cause checklist for explicit debugging passes in ${projectName}. Use when a bug, failing test, or surprising behavior needs a formal diagnosis before changing code.
+---
+
+# Systematic Debugging
+
+Use this skill when behavior is broken, unclear, or surprising and you want an explicit root-cause checklist before changing code.
+
+## Core rule
+
+**No fixes before root-cause analysis.**
+
+Symptom fixes are not enough, especially around auth, routing, deployment, migrations, external integrations, and other contract-sensitive flows.
+
+## Required flow
+
+1. **Reproduce clearly**
+   - What failed?
+   - How can it be triggered again?
+   - Which command, route, interaction, or payload shows the issue?
+
+2. **Read the evidence first**
+   - Error message, stack trace, failing assertion, HTTP response, or visible broken behavior
+   - Recent changes in the touched area
+   - Existing validation or contract checks already available in the repo
+
+3. **Trace the failing path**
+   - Follow the value or control flow backward to the first bad input or wrong decision
+   - For multi-layer issues, inspect each boundary explicitly
+   - For library or framework uncertainty, prefer version-specific docs before guessing
+
+4. **Compare with a known-good path**
+   - Find nearby working code, tests, or similar flows in the repo
+   - Identify the concrete difference instead of assuming
+
+5. **Form one hypothesis**
+   - State the most likely root cause
+   - Make the smallest possible change to test that hypothesis
+
+6. **Verify the fix**
+   - Run the smallest credible command that proves the issue is fixed
+   - If the first fix fails, go back to the evidence; do not stack random changes
+
+## Repo-local reminders
+
+- If the issue touches high-risk or contract-sensitive surfaces, also apply \`project-contracts\`.
+- If the fix becomes non-trivial, route the result through \`requesting-code-review\` before concluding when that skill exists in the repo.
+
+## Anti-patterns
+
+- "Quick fix for now"
+- Multiple speculative changes in one pass
+- Treating a green build as proof without reproducing the original symptom
+- Declaring success before fresh verification output
+`
+  );
+} else {
+  removePath('.agents/skills/systematic-debugging');
+}
+
+if (desiredSkillSet.has('verification-before-completion')) {
+  writeFile(
+    '.agents/skills/verification-before-completion/SKILL.md',
+    `---
+description: Structured pre-handoff verification checklist for ${projectName}. Use immediately before a commit-ready or success claim when you want an explicit proof pass.
+---
+
+# Verification Before Completion
+
+Use this skill immediately before any success claim, completion statement, handoff, or commit-ready conclusion when you want an explicit final proof pass.
+
+## Core rule
+
+**No success claims without fresh verification evidence.**
+
+If you have not just run the command that proves the claim, you cannot honestly claim the work is done.
+
+## Required flow
+
+1. **State the claim**
+   - Example: "the bug is fixed", "the build passes", "the change is ready"
+
+2. **Choose the smallest credible proof**
+   - For harness, skill, or docs changes: use the smallest existing command that proves the edited surface still works
+   - For route, contract, or behavior changes: use the most targeted command that truly covers the claim
+   - Prefer \`project-verify\` guidance when the repo already has it
+
+3. **Run the command fresh**
+   - Do not rely on an earlier run
+   - Read the actual output and exit status
+
+4. **Compare output to the claim**
+   - If it proves the claim, report success plainly
+   - If it does not, report the actual state instead of optimistic wording
+
+## Repo-local reminders
+
+- For high-risk surfaces, verification is not optional just because the change looks small.
+- If the change is non-trivial, pair this skill with \`requesting-code-review\` when that skill exists in the repo.
+
+## Anti-patterns
+
+- "Should work now"
+- "Looks good"
+- Reusing stale command output
+- Claiming a bug is fixed without checking the original failing path
+- Treating agent output as proof without independent verification
+`
+  );
+} else {
+  removePath('.agents/skills/verification-before-completion');
+}
+
+if (desiredSkillSet.has('requesting-code-review')) {
+  writeFile(
+    '.agents/skills/requesting-code-review/SKILL.md',
+    `---
+description: Structured review-routing checklist for large or high-risk changes in ${projectName}. Use when the diff needs an explicit review gate before concluding.
+---
+
+# Requesting Code Review
+
+Use this skill when a change is large enough, risky enough, or cross-cutting enough that it should not rely on self-review alone.
+
+## When this is required
+
+Run a review gate when the change is:
+
+- non-trivial in logic or scope
+- cross-file or cross-surface
+- contract-sensitive
+- security-relevant or data-sensitive
+
+Tiny copy tweaks or narrowly scoped docs-only edits can skip this if there is no meaningful review surface.
+
+## Review routing
+
+1. **Default reviewer:** \`project-reviewer\`
+   - Use for most non-trivial repo changes
+
+2. **Security reviewer:** \`security-review\`
+   - Add when the change is plausibly security-sensitive
+
+## What to give the reviewer
+
+Provide concise, complete context:
+
+- what changed
+- what requirement or bug it addresses
+- which files or surfaces matter most
+- which validation was already run
+- any known trade-offs or open questions
+
+## After review
+
+- Fix high-signal findings before concluding
+- If a finding is wrong, answer it with concrete reasoning and evidence
+- Do not treat "tests pass" as a substitute for review on non-trivial work
+
+## Repo-local reminders
+
+- Pair this skill with \`verification-before-completion\`; review does not replace verification.
+- For bugs or regressions, use \`systematic-debugging\` first when that skill exists in the repo, then review the resulting fix if it is non-trivial.
+`
+  );
+} else {
+  removePath('.agents/skills/requesting-code-review');
 }
 
 try {

@@ -40,7 +40,7 @@ Please set up CLAUDE.md, .claude/, skills, subagents, and a small eval pack for 
 - repo-local agent files and shared contract files
 - protection hooks
 - post-edit and stop hooks when they make sense
-- project-verify / project-deploy / project-contracts plus systematic-debugging / verification-before-completion / requesting-code-review as the default baseline
+- project-verify / project-deploy / project-contracts as the lean default baseline, with workflow checklist skills added only when the repo benefits from the extra ceremony
 - surface or other stack-specific skills depending on the stack
 - eval pack
 - no blind overwriting of existing repo instructions
