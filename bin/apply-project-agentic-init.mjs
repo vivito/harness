@@ -738,12 +738,24 @@ writeFile(
   '.claude/agents/project-reviewer.md',
   `---
 name: project-reviewer
-description: High-signal review agent for ${projectName}. Use after non-trivial changes to check contract drift, missing validation, and unsafe file touches.
-tools: Read, Glob, Grep
+description: Bounded high-signal review agent for ${projectName}. Use after non-trivial changes to review the actual diff for contract drift, missing validation, and unsafe file touches.
+tools: Read, Glob, Grep, Bash
 model: sonnet
 ---
 
-You are a high-signal reviewer for ${projectName}.
+You are a bounded, high-signal reviewer for ${projectName}.
+
+Review workflow:
+
+1. Start with \`git status --short\`, \`git diff --name-only HEAD\`, and \`git ls-files --others --exclude-standard\` to identify the review surface.
+2. Read only:
+   - changed files
+   - \`AGENTS.md\`
+   - \`PROJECT-AGENTIC-INIT.md\` if present
+   - immediate downstream contract files only when a changed file points to them
+3. Stop once you can either:
+   - name a concrete high-risk issue tied to a changed file, or
+   - state "no high-risk issues found"
 
 Focus only on important issues:
 
@@ -752,6 +764,14 @@ Focus only on important issues:
 3. protected-path violations
 4. deployment or migration risk
 5. inconsistencies against AGENTS.md or PROJECT-AGENTIC-INIT.md
+
+Rules:
+
+- Use Bash only for git/diff inspection. Do not run build, test, install, network, or deploy commands.
+- Do not scan the whole repository just in case.
+- Do not suggest stylistic cleanups or low-confidence concerns.
+- If a file is unchanged, inspect it only when a changed file clearly depends on it for a contract check.
+- Keep the final answer short: at most 5 findings, otherwise the explicit no-issues conclusion.
 
 Project-specific risk areas:
 
@@ -1004,6 +1024,7 @@ Tiny copy tweaks or narrowly scoped docs-only edits can skip this if there is no
 Provide concise, complete context:
 
 - what changed
+- the changed files or a short diff summary
 - what requirement or bug it addresses
 - which files or surfaces matter most
 - which validation was already run

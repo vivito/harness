@@ -58,6 +58,21 @@ node_check() {
   fi
 }
 
+file_contains() {
+  local file="$1"
+  local needle="$2"
+  local label="$3"
+  if [[ ! -f "$file" ]]; then
+    fail "Missing file $file for content check"
+    return
+  fi
+  if grep -Fq "$needle" "$file"; then
+    pass "$label"
+  else
+    fail "$label"
+  fi
+}
+
 harness_has_post_edit_checks() {
   node - <<'NODE' >/dev/null 2>&1
 const fs = require('node:fs');
@@ -142,6 +157,11 @@ if [[ -d ".agents/skills" ]]; then
 else
   fail "Missing canonical .agents/skills directory"
 fi
+
+require_path ".claude/agents/project-reviewer.md"
+file_contains ".claude/agents/project-reviewer.md" "tools: Read, Glob, Grep, Bash" "project-reviewer can inspect git diff via Bash"
+file_contains ".claude/agents/project-reviewer.md" "git diff --name-only HEAD" "project-reviewer starts from changed files"
+file_contains ".claude/agents/project-reviewer.md" "Do not scan the whole repository just in case." "project-reviewer stays bounded"
 
 require_path ".agents/skills/project-verify/SKILL.md"
 require_path ".agents/skills/project-deploy/SKILL.md"

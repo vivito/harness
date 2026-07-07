@@ -144,6 +144,7 @@ Different repos need different overlays:
 - Playwright repos: e2e-aware verify skill
 
 Use the smallest set of skills that gives leverage.
+Reviewer agents should be diff-first and bounded: start from changed files, inspect only immediate contract neighbors, and conclude quickly instead of scanning the whole repo.
 
 ### 5. Keep deployment human-gated
 
