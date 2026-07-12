@@ -1,15 +1,11 @@
 ---
-applyTo: "**"
+applyTo: "AGENTS.md,PROJECT-AGENTIC-INIT.md,.github/copilot-instructions.md,.github/hooks/*.json,.github/instructions/**/*.instructions.md,.agentic/harness.json,.agentic/hooks/*.mjs,.claude/settings.json,.claude/agents/*.md,.agents/skills/**/*.md,skills/project-bootstrap/**/*.md,bin/agentic-project-init,bin/apply-project-agentic-init.mjs,templates/**/*.md,templates/**/*.sh,copilot/agentic-bootstrap.instructions.md,docs/agentic-eval-pack.md,docs/harness-token-optimization.md"
 ---
 
-Treat the following as contract surfaces and update them carefully:
+These files define the repo-level agent contract.
 
-- **Auth:** there is no classic product auth layer; the critical area is permissions and hook policy in `.claude/settings.json`, `.github/hooks/*.json`, and the generated protect/stop hooks
-- **Routing:** CLI flags, template resolution, and the two-stage flow `install.sh` -> `bin/agentic-project-init` -> `bin/apply-project-agentic-init.mjs`
-- **Payments / orders:** none in this repository
-- **Customer or personal data:** there is no product database, but user-home paths under `$HOME` (`~/.copilot`, `~/.agents`, `~/.claude`, `~/.config/agentic-bootstrap`) are sensitive
-- **External APIs / SSO / sync:** no external web APIs in the code; the critical part is keeping repo sources, installed home-directory copies, and adapter/symlink structures in sync
-- **Other critical flows:** generation of templates, guardrails, hooks, skills, and the eval pack; small changes can affect many generated files in target repositories
-
+- Keep them aligned with `AGENTS.md`, `PROJECT-AGENTIC-INIT.md`, and `.agentic/harness.json`.
+- Keep automatic hooks fast, quiet, non-recursive, and easy to disable.
+- Only auto-wire stop hooks when cheap fast checks actually exist.
+- Avoid broad global instructions when a narrower `applyTo` pattern is enough.
 - Prefer the smallest credible validation after changes.
-- Mention downstream surfaces that also need updates when relevant.

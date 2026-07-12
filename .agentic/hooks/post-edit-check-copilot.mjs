@@ -1,22 +1,88 @@
-import { readStdin, loadHarnessConfig, parseHookInput, getToolPaths, getCommandPaths, selectPostEditCommands, runCommands, summarizeFailures } from './harness-lib.mjs';
+import {
+  areHooksDisabled,
+  computePathStateHash,
+  formatRuntimeError,
+  getCommandFingerprint,
+  getToolPaths,
+  isFastChecksEnabled,
+  isRecursiveHookInvocation,
+  isToolWriteOperation,
+  loadHarnessConfig,
+  parseHookInput,
+  readHookState,
+  readStdin,
+  runCommands,
+  selectPostEditPlan,
+  summarizeFailures,
+  withLock,
+  writeHookState,
+} from './harness-lib.mjs';
 
 const raw = await readStdin();
 const payload = raw.trim() ? JSON.parse(raw) : {};
 const { toolName, toolArgs, isClaude } = parseHookInput(payload);
 if (isClaude) process.exit(0);
 
-const config = loadHarnessConfig();
-const relativePaths = /^(bash|powershell)$/i.test(toolName)
-  ? getCommandPaths(toolArgs?.command || '')
-  : getToolPaths(toolName, toolArgs);
-const commands = selectPostEditCommands(relativePaths, config);
+let config;
+try {
+  config = loadHarnessConfig();
+} catch (error) {
+  process.stdout.write(JSON.stringify({
+    additionalContext: `Harness post-edit hook error: ${formatRuntimeError(error)}`,
+  }));
+  process.exit(0);
+}
 
-if (commands.length === 0) process.exit(0);
+if (areHooksDisabled(config) || isRecursiveHookInvocation(config) || !isFastChecksEnabled(config)) {
+  process.exit(0);
+}
 
-const results = runCommands(commands);
-const failureSummary = summarizeFailures(results);
+if (!isToolWriteOperation(toolName)) {
+  process.exit(0);
+}
+
+const plan = selectPostEditPlan(getToolPaths(toolName, toolArgs), config);
+if (plan.commands.length === 0 || plan.matchedPaths.length === 0) {
+  process.exit(0);
+}
+
+const commandKey = getCommandFingerprint(plan.commands, 'fast');
+const stateHash = computePathStateHash(plan.matchedPaths);
+const now = Date.now();
+const previousState = readHookState(config, 'post-edit');
+const cooldownMs = config?.hookSettings?.postEditCooldownMs ?? 5000;
+
+if (previousState.commandKey === commandKey) {
+  if (previousState.stateHash === stateHash) {
+    process.exit(0);
+  }
+  if (typeof previousState.completedAt === 'number' && (now - previousState.completedAt) < cooldownMs) {
+    process.exit(0);
+  }
+}
+
+const lock = withLock(config, 'post-edit', () => {
+  const results = runCommands(plan.commands, { config, tier: 'fast' });
+  const failureSummary = summarizeFailures(results, config);
+
+  writeHookState(config, 'post-edit', {
+    commandKey,
+    stateHash,
+    completedAt: Date.now(),
+    status: failureSummary ? 'fail' : 'pass',
+    failureSummary,
+  });
+
+  return failureSummary;
+});
+
+if (!lock.acquired) {
+  process.exit(0);
+}
+
+const failureSummary = lock.value;
 if (failureSummary) {
   process.stdout.write(JSON.stringify({
-    additionalContext: `Post-edit checks failed${relativePaths.length ? ` for ${relativePaths.join(', ')}` : ''}:\n${failureSummary}`,
+    additionalContext: `Harness fast checks failed:\n${failureSummary}`,
   }));
 }

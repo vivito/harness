@@ -142,6 +142,31 @@ write_file() {
   return 0
 }
 
+copy_checked_in_file() {
+  local source_rel="$1"
+  local dest="$2"
+  local source_path="${SCRIPT_DIR}/../${source_rel}"
+
+  if [[ ! -f "$source_path" && -f "${HOME}/.config/agentic-bootstrap/${source_rel}" ]]; then
+    source_path="${HOME}/.config/agentic-bootstrap/${source_rel}"
+  fi
+
+  if [[ ! -f "$source_path" ]]; then
+    echo "Missing checked-in file: $source_rel" >&2
+    exit 1
+  fi
+
+  mkdir -p "$(dirname "$dest")"
+
+  if [[ -e "$dest" && "$FORCE" != "1" ]]; then
+    echo "skip: $dest"
+    return 0
+  fi
+
+  cp "$source_path" "$dest"
+  echo "copy: $dest"
+}
+
 create_link_or_copy() {
   local target_name="$1"
   local dest_path="${TARGET_DIR}/${target_name}"
@@ -272,7 +297,6 @@ if [[ -f "${TARGET_DIR}/package.json" ]]; then
     append_unique claude_allow_rules "Bash(npm run build)"
   fi
   if package_has_script lint; then
-    append_unique post_edit_commands "npm run lint"
     append_unique stop_commands "npm run lint"
     append_unique claude_allow_rules "Bash(npm run lint)"
   fi
@@ -293,7 +317,6 @@ if [[ -f "${TARGET_DIR}/package.json" ]]; then
     append_unique claude_allow_rules "Bash(npm run test:frontend)"
   fi
   if package_has_script "check:node"; then
-    append_unique post_edit_commands "npm run check:node"
     append_unique claude_allow_rules "Bash(npm run check:node)"
   fi
   if package_has_script "images:webp"; then
@@ -309,7 +332,6 @@ if [[ -f "${TARGET_DIR}/package.json" ]]; then
 fi
 
 if [[ "$has_prisma" == "1" ]]; then
-  append_unique post_edit_commands "npx prisma validate"
   append_unique stop_commands "npx prisma validate"
   append_unique claude_allow_rules "Bash(npx prisma validate)"
   append_unique claude_deny_rules "Bash(npx prisma migrate deploy)"
@@ -340,6 +362,7 @@ fi
 render_template "${TEMPLATE_DIR}/AGENTS.md" "${TARGET_DIR}/AGENTS.md"
 render_template "${TEMPLATE_DIR}/copilot-instructions.md" "${TARGET_DIR}/.github/copilot-instructions.md"
 render_template "${TEMPLATE_DIR}/agentic-eval-pack.md" "${TARGET_DIR}/docs/agentic-eval-pack.md"
+render_template "${TEMPLATE_DIR}/harness-token-optimization.md" "${TARGET_DIR}/docs/harness-token-optimization.md"
 render_template "${TEMPLATE_DIR}/test-harness.sh" "${TARGET_DIR}/test-harness.sh"
 chmod +x "${TARGET_DIR}/test-harness.sh"
 create_link_or_copy "CLAUDE.md"
@@ -374,6 +397,52 @@ EOF
   post_edit_json="$(json_array_var post_edit_commands)"
   stop_commands_json="$(json_array_var stop_commands)"
   stack_json="$(json_array_var stack_tags)"
+  declare -a post_edit_patterns=(
+    "package.json"
+    "tsconfig.json"
+    "jsconfig.json"
+    "pyproject.toml"
+    "go.mod"
+    "Cargo.toml"
+    "composer.json"
+    "Gemfile"
+    "Gemfile.lock"
+    "bin/agentic-project-init"
+    "*.sh"
+    "**/*.sh"
+    "*.js"
+    "**/*.js"
+    "*.mjs"
+    "**/*.mjs"
+    "*.cjs"
+    "**/*.cjs"
+    "*.ts"
+    "**/*.ts"
+    "*.tsx"
+    "**/*.tsx"
+    "*.jsx"
+    "**/*.jsx"
+    "*.json"
+    "**/*.json"
+    "*.yml"
+    "**/*.yml"
+    "*.yaml"
+    "**/*.yaml"
+    "*.toml"
+    "**/*.toml"
+  )
+  declare -a post_edit_ignore_patterns=("*.md" "**/*.md" "docs/**")
+  post_edit_patterns_json="$(json_array_var post_edit_patterns)"
+  post_edit_ignore_patterns_json="$(json_array_var post_edit_ignore_patterns)"
+  post_edit_rules_json='[]'
+  if [[ "${#post_edit_commands[@]}" -gt 0 ]]; then
+    post_edit_rules_json="$(node -e '
+      const patterns = JSON.parse(process.argv[1]);
+      const ignorePatterns = JSON.parse(process.argv[2]);
+      const commands = JSON.parse(process.argv[3]);
+      process.stdout.write(JSON.stringify([{ name: "relevant-fast-checks", patterns, ignorePatterns, commands }]));
+    ' "$post_edit_patterns_json" "$post_edit_ignore_patterns_json" "$post_edit_json")"
+  fi
 
   write_file "$harness_path" <<EOF
 {
@@ -384,664 +453,37 @@ EOF
   "protectedExistingPrefixes": ${protected_existing_prefixes_json},
   "protectedRegexes": ${protected_regexes_json},
   "deniedCommandRegexes": ${denied_commands_json},
+  "hookSettings": {
+    "disabledEnvVar": "HARNESS_HOOKS_DISABLED",
+    "fastChecksEnvVar": "HARNESS_FAST_CHECKS",
+    "fullChecksEnvVar": "HARNESS_FULL_CHECKS",
+    "recursiveGuardEnvVar": "HARNESS_HOOK_ACTIVE",
+    "stateDirEnvVar": "HARNESS_HOOK_STATE_DIR",
+    "postEditCooldownMs": 5000,
+    "lockStaleMs": 120000,
+    "maxOutputLines": 12,
+    "maxOutputBytes": 4000,
+    "maxBufferBytes": 131072,
+    "fastTimeoutSec": 20,
+    "fullTimeoutSec": 180
+  },
+  "postEditRules": ${post_edit_rules_json},
   "postEditCommands": ${post_edit_json},
-  "stopCommands": ${stop_commands_json}
+  "stopCommands": ${stop_commands_json},
+  "fullCheckCommands": ${stop_commands_json}
 }
 EOF
 
-  write_file "${TARGET_DIR}/.agentic/hooks/harness-lib.mjs" <<'EOF'
-import fs from 'node:fs';
-import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-
-const HOOKS_DIR = path.dirname(fileURLToPath(import.meta.url));
-
-export function getProjectRoot() {
-  const rootFromEnv = process.env.CLAUDE_PROJECT_DIR || process.env.GITHUB_WORKSPACE;
-  if (rootFromEnv) return path.resolve(rootFromEnv);
-  return path.resolve(HOOKS_DIR, '..', '..');
-}
-
-export function readStdin() {
-  return new Promise((resolve, reject) => {
-    let data = '';
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (chunk) => {
-      data += chunk;
-    });
-    process.stdin.on('end', () => resolve(data));
-    process.stdin.on('error', reject);
-  });
-}
-
-export function loadHarnessConfig() {
-  const configPath = path.join(getProjectRoot(), '.agentic', 'harness.json');
-  return JSON.parse(fs.readFileSync(configPath, 'utf8'));
-}
-
-export function normalizePath(candidatePath) {
-  if (!candidatePath) return '';
-  const projectRoot = getProjectRoot();
-  const absolute = path.resolve(projectRoot, candidatePath);
-  const relative = path.relative(projectRoot, absolute);
-  if (!relative) return '.';
-  return relative.split(path.sep).join('/');
-}
-
-function escapeRegex(source) {
-  return source.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
-}
-
-export function matchesPathPattern(relativePath, pattern) {
-  if (!relativePath || !pattern) return false;
-
-  let source = '^';
-  for (let index = 0; index < pattern.length; index += 1) {
-    const char = pattern[index];
-    if (char === '*') {
-      const next = pattern[index + 1];
-      if (next === '*') {
-        source += '.*';
-        index += 1;
-      } else {
-        source += '[^/]*';
-      }
-      continue;
-    }
-
-    if (char === '?') {
-      source += '[^/]';
-      continue;
-    }
-
-    source += escapeRegex(char);
-  }
-
-  source += '$';
-  return new RegExp(source).test(relativePath);
-}
-
-export function getToolPaths(toolName, toolArgs) {
-  if (!/^(edit|write|create|multiedit|read|view)$/i.test(toolName || '')) {
-    return [];
-  }
-
-  const candidates = [
-    toolArgs?.file_path,
-    toolArgs?.path,
-  ];
-
-  return [...new Set(candidates.map(normalizePath).filter(Boolean))];
-}
-
-export function getSearchPaths(toolArgs) {
-  const rawPaths = Array.isArray(toolArgs?.paths)
-    ? toolArgs.paths
-    : toolArgs?.paths
-      ? [toolArgs.paths]
-      : [toolArgs?.path];
-
-  return [...new Set(rawPaths.map(normalizePath).filter(Boolean))];
-}
-
-export function getCommandPaths(command) {
-  const strippedCommand = stripLeadingShellPrefixes(command);
-  const nestedShellCommand = extractNestedShellCommand(strippedCommand);
-  const nestedPaths = nestedShellCommand ? getCommandPaths(nestedShellCommand) : [];
-  const rawTokens = String(strippedCommand || '').match(/(?:[^\s"'`]+|"[^"]*"|'[^']*')+/g) || [];
-  const candidates = rawTokens
-    .map((token) => token.replace(/^['"`]+|['"`]+$/g, '').replace(/^[()]+|[()]+$/g, ''))
-    .filter((token) => (
-      token.includes('/')
-      || /\.(?:md|json|js|mjs|sh|jsx|tsx|ts|css|sql)$/i.test(token)
-      || fs.existsSync(path.resolve(getProjectRoot(), token))
-    ));
-
-  return [...new Set([
-    ...nestedPaths,
-    ...candidates.map(normalizePath).filter(Boolean),
-  ])];
-}
-
-function tokenizeShellWords(segment) {
-  return String(segment || '').match(/(?:[^\s"'`]+|"[^"]*"|'[^']*')+/g) || [];
-}
-
-function unquoteShellToken(token) {
-  return token.replace(/^['"`]+|['"`]+$/g, '');
-}
-
-function splitCommandSegments(command) {
-  return String(command || '').split(/\s*(?:&&|\|\||\||;|\n)\s*/).filter(Boolean);
-}
-
-function isScriptExecutionSegment(segment) {
-  return (
-    /^(?:\/?[^/\s]+\/)*(?:bash|sh|node|python|python3|perl)\b/.test(segment)
-    || /^\.\//.test(segment)
-    || /^(?:[^/\s]+\/)+[^\s]+\.(?:sh|js|mjs|cjs|py)\b/.test(segment)
-  );
-}
-
-function getNpmRunScriptName(segment) {
-  const match = segment.match(/^npm\s+run(?:\s+--silent)?\s+([^\s]+)\b/);
-  return match ? match[1] : '';
-}
-
-function stripLeadingShellPrefixes(segment) {
-  let remaining = String(segment || '').trim();
-  while (/^(?:\/?[^/\s]+\/)*env\b/.test(remaining)) {
-    remaining = remaining.replace(/^(?:\/?[^/\s]+\/)*env\b\s*/, '').trimStart();
-    while (/^-[^\s]+\s+/.test(remaining)) {
-      remaining = remaining.replace(/^-[^\s]+\s+/, '').trimStart();
-    }
-    if (remaining.startsWith('-- ')) {
-      remaining = remaining.slice(3).trimStart();
-    } else if (remaining === '--') {
-      remaining = '';
-    }
-    while (/^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]+)\s*/.test(remaining)) {
-      remaining = remaining.replace(/^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]+)\s*/, '').trimStart();
-    }
-  }
-  while (true) {
-    const match = remaining.match(/^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]+)\s+/);
-    if (!match) break;
-    remaining = remaining.slice(match[0].length).trimStart();
-  }
-  return remaining;
-}
-
-function extractNestedShellCommand(segment) {
-  const match = segment.match(/^(?:\/?[^/\s]+\/)*(?:bash|sh)\b(?:\s+-[A-Za-z-]+\b)*\s+\$?(['"])([\s\S]*?)\1(?:\s+.*)?$/);
-  return match ? match[2] : '';
-}
-
-function isGitPushSegment(segment) {
-  const tokens = tokenizeShellWords(stripLeadingShellPrefixes(segment)).map(unquoteShellToken);
-  if (tokens.length === 0) return false;
-
-  let index = 0;
-  if (!/(?:^|\/)git$/.test(tokens[index])) return false;
-  index += 1;
-
-  while (index < tokens.length) {
-    const token = tokens[index];
-    if (token === '--') {
-      index += 1;
-      break;
-    }
-    if (['-c', '-C', '--exec-path', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env'].includes(token)) {
-      index += 2;
-      continue;
-    }
-    if (/^--(?:exec-path|git-dir|work-tree|namespace|super-prefix|config-env)=/.test(token)) {
-      index += 1;
-      continue;
-    }
-    if (token.startsWith('-') && token !== '-') {
-      index += 1;
-      continue;
-    }
-    return token === 'push';
-  }
-
-  return index < tokens.length && tokens[index] === 'push';
-}
-
-function isDirectInlineInterpreterSegment(segment) {
-  return (
-    /^\s*(?:\/?[^/\s]+\/)*node\b(?:\s+(?:--[^\s]+|-[A-Za-z][^\s]*)(?:\s+(?:"[^"]*"|'[^']*'|[^\s]+))?)*\s+(?:-(?:e|p)\b|--(?:eval|print)\b|-\s*(?:<<|$))/s.test(segment)
-    || /^\s*(?:\/?[^/\s]+\/)*python3?\b(?:\s+(?:--[^\s]+|-[A-Za-z][^\s]*)(?:\s+(?:"[^"]*"|'[^']*'|[^\s]+))?)*\s+(?:-c\b|-\s*(?:<<|$))/s.test(segment)
-    || /^\s*(?:\/?[^/\s]+\/)*perl\b(?:\s+(?:--[^\s]+|-[A-Za-z0-9][^\s]*)(?:\s+(?:"[^"]*"|'[^']*'|[^\s]+))?)*\s+(?:-[A-Za-z0-9]*e[A-Za-z0-9]*\b|-\s*(?:<<|$))/s.test(segment)
-  );
-}
-
-function isInlineInterpreterSegment(segment) {
-  const trimmed = stripLeadingShellPrefixes(segment);
-  if (isDirectInlineInterpreterSegment(trimmed)) {
-    return true;
-  }
-  const nestedShellCommand = extractNestedShellCommand(trimmed);
-  return nestedShellCommand ? isInlineInterpreterSegment(nestedShellCommand) : false;
-}
-
-export function parseHookInput(payload) {
-  const toolName =
-    payload?.toolName
-    || payload?.tool_name
-    || '';
-
-  const rawArgs =
-    payload?.toolArgs
-    || payload?.tool_input
-    || {};
-
-  let toolArgs = rawArgs;
-  if (typeof rawArgs === 'string') {
-    try {
-      toolArgs = JSON.parse(rawArgs);
-    } catch {
-      toolArgs = { command: rawArgs };
-    }
-  }
-
-  const hookEventName = payload?.hook_event_name || null;
-  const isCopilot = Boolean(payload?.toolName || payload?.toolArgs || payload?.sessionId);
-  const isClaude = Boolean(payload?.tool_input || payload?.session_id || hookEventName);
-
-  return { toolName, toolArgs, hookEventName, isCopilot, isClaude };
-}
-
-export function isProtectedPath(relativePath, config) {
-  if (!relativePath) return null;
-  if (relativePath === '.') {
-    return 'Repository-root access must be scoped to child paths.';
-  }
-  if (relativePath === '..' || relativePath.startsWith('../')) {
-    return `${relativePath} is outside the repository root.`;
-  }
-
-  for (const exactPath of config.protectedExactPaths || []) {
-    if (relativePath === exactPath) {
-      return `${relativePath} is protected.`;
-    }
-  }
-
-  for (const prefix of config.protectedPrefixes || []) {
-    if (relativePath === prefix.replace(/\/$/, '') || relativePath.startsWith(prefix)) {
-      return `${relativePath} is inside a protected or generated path (${prefix}).`;
-    }
-  }
-
-  for (const source of config.protectedRegexes || []) {
-    const regex = new RegExp(source);
-    if (regex.test(relativePath)) {
-      return `${relativePath} matches a protected pattern (${source}).`;
-    }
-  }
-
-  return null;
-}
-
-export function isProtectedExistingPath(relativePath, config) {
-  if (!relativePath) return null;
-
-  for (const prefix of config.protectedExistingPrefixes || []) {
-    if (relativePath === prefix.replace(/\/$/, '') || relativePath.startsWith(prefix)) {
-      const absolutePath = path.resolve(getProjectRoot(), relativePath);
-      if (fs.existsSync(absolutePath)) {
-        return `${relativePath} already exists inside a history-sensitive protected path (${prefix}). Create a new file instead of rewriting it.`;
-      }
-    }
-  }
-
-  return null;
-}
-
-export function isDeniedCommand(command, config) {
-  const normalized = String(command || '').trim();
-  if (!normalized) return null;
-  const strippedNormalized = stripLeadingShellPrefixes(normalized);
-  const nestedWholeCommand = extractNestedShellCommand(strippedNormalized);
-  if (nestedWholeCommand) {
-    const nestedWholeReason = isDeniedCommand(nestedWholeCommand, config);
-    if (nestedWholeReason) {
-      return nestedWholeReason;
-    }
-  }
-  const segments = splitCommandSegments(normalized);
-
-  for (const segment of segments) {
-    const strippedSegment = stripLeadingShellPrefixes(segment);
-    if (isGitPushSegment(strippedSegment)) {
-      return 'Command is blocked by policy (git push).';
-    }
-
-    for (const source of config.deniedCommandRegexes || []) {
-      const regex = new RegExp(source);
-      if (regex.test(segment) || regex.test(strippedSegment)) {
-        return `Command is blocked by policy (${source}).`;
-      }
-    }
-
-    const nestedShellCommand = extractNestedShellCommand(strippedSegment);
-    if (nestedShellCommand) {
-      const nestedReason = isDeniedCommand(nestedShellCommand, config);
-      if (nestedReason) {
-        return nestedReason;
-      }
-    }
-
-    const pathReason = getCommandPaths(strippedSegment)
-      .map((relativePath) => isProtectedPath(relativePath, config))
-      .find(Boolean);
-    if (pathReason) {
-      return pathReason;
-    }
-  }
-
-  if (/(^|[\s"'=])(?:\.\/)?\.env(?:\.[A-Za-z0-9._-]+)?(?=$|[\s"'/:])/.test(normalized)) {
-    return 'Command references a protected env file.';
-  }
-
-  const mutatingSegment = segments.find((segment) => /(>|>>|\b(?:cp|mv|rm|touch|tee|truncate|install)\b|\bsed\b.*\s-i\b|\bperl\b.*\s-i\b)/.test(stripLeadingShellPrefixes(segment)));
-  if (mutatingSegment) {
-    const strippedSegment = stripLeadingShellPrefixes(mutatingSegment);
-    const protectedExistingReason = getCommandPaths(strippedSegment)
-      .map((relativePath) => isProtectedExistingPath(relativePath, config))
-      .find(Boolean);
-    if (protectedExistingReason) {
-      return protectedExistingReason;
-    }
-  }
-
-  const allowedExecutablePaths = new Set(config.allowedExecutablePaths || []);
-  const allowedNpmScripts = new Set(config.allowedNpmScripts || []);
-
-  if (allowedNpmScripts.size > 0) {
-    for (const segment of segments) {
-      const scriptName = getNpmRunScriptName(stripLeadingShellPrefixes(segment));
-      if (scriptName && !allowedNpmScripts.has(scriptName)) {
-        return `Command executes an unapproved npm script (${scriptName}).`;
-      }
-    }
-  }
-
-  const inlineInterpreterSegment = segments.find((segment) => isInlineInterpreterSegment(segment));
-  if (inlineInterpreterSegment) {
-    return 'Inline node/python evaluators are blocked. Put the logic in a checked-in script first.';
-  }
-
-  if (allowedExecutablePaths.size > 0) {
-    for (const segment of segments) {
-      const strippedSegment = stripLeadingShellPrefixes(segment);
-      if (!isScriptExecutionSegment(strippedSegment)) continue;
-      for (const scriptPath of getCommandPaths(strippedSegment).filter((candidate) => candidate !== '.')) {
-        if (!allowedExecutablePaths.has(scriptPath)) {
-          return `Command executes an unapproved local script (${scriptPath}).`;
-        }
-      }
-    }
-  }
-
-  return null;
-}
-
-export function selectPostEditCommands(relativePaths, config) {
-  const rules = Array.isArray(config?.postEditRules) ? config.postEditRules : [];
-  const normalizedPaths = [...new Set((relativePaths || []).map(normalizePath).filter(Boolean))];
-  const matchedCommands = [];
-
-  for (const relativePath of normalizedPaths) {
-    for (const rule of rules) {
-      const patterns = Array.isArray(rule?.patterns) ? rule.patterns : [];
-      const commands = Array.isArray(rule?.commands) ? rule.commands : [];
-      if (patterns.some((pattern) => matchesPathPattern(relativePath, pattern))) {
-        matchedCommands.push(...commands);
-      }
-    }
-  }
-
-  if (matchedCommands.length > 0) {
-    return [...new Set(matchedCommands)];
-  }
-
-  if (rules.length > 0) {
-    return [];
-  }
-
-  return Array.isArray(config?.postEditCommands) ? config.postEditCommands : [];
-}
-
-export function runCommands(commands) {
-  const results = [];
-  for (const command of commands || []) {
-    const result = spawnSync(command, {
-      shell: true,
-      cwd: getProjectRoot(),
-      encoding: 'utf8',
-      env: process.env,
-    });
-    results.push({
-      command,
-      status: typeof result.status === 'number' ? result.status : 1,
-      stdout: result.stdout || '',
-      stderr: result.stderr || '',
-      error: result.error ? String(result.error.message || result.error) : '',
-    });
-    if (result.error || result.status !== 0) break;
-  }
-  return results;
-}
-
-export function summarizeFailures(results) {
-  return (results || [])
-    .filter((entry) => entry.status !== 0 || entry.error)
-    .map((entry) => {
-      const details = [entry.stderr.trim(), entry.stdout.trim(), entry.error].filter(Boolean)[0] || 'unknown failure';
-      return `${entry.command}: ${details}`;
-    })
-    .join('\n');
-}
-EOF
-
-  write_file "${TARGET_DIR}/.agentic/hooks/protect-files-copilot.mjs" <<'EOF'
-import { readStdin, loadHarnessConfig, parseHookInput, getToolPaths, getSearchPaths, isProtectedPath, isProtectedExistingPath, isDeniedCommand } from './harness-lib.mjs';
-
-const raw = await readStdin();
-const payload = raw.trim() ? JSON.parse(raw) : {};
-const config = loadHarnessConfig();
-const { toolName, toolArgs } = parseHookInput(payload);
-
-let reason = null;
-if (/^(edit|create|view|read|write|multiedit)$/i.test(toolName)) {
-  reason = getToolPaths(toolName, toolArgs)
-    .map((relativePath) => isProtectedPath(relativePath, config) || isProtectedExistingPath(relativePath, config))
-    .find(Boolean) || null;
-} else if (/^(rg|glob|grep)$/i.test(toolName)) {
-  reason = getSearchPaths(toolArgs)
-    .map((relativePath) => isProtectedPath(relativePath, config) || isProtectedExistingPath(relativePath, config))
-    .find(Boolean) || null;
-} else if (/^(bash|powershell)$/i.test(toolName)) {
-  reason = isDeniedCommand(toolArgs?.command || '', config);
-}
-
-if (reason) {
-  process.stdout.write(JSON.stringify({
-    permissionDecision: 'deny',
-    permissionDecisionReason: reason,
-  }));
-}
-EOF
-
-  write_file "${TARGET_DIR}/.agentic/hooks/protect-files-claude.mjs" <<'EOF'
-import { readStdin, loadHarnessConfig, parseHookInput, getToolPaths, getSearchPaths, isProtectedPath, isProtectedExistingPath, isDeniedCommand } from './harness-lib.mjs';
-
-const raw = await readStdin();
-const payload = raw.trim() ? JSON.parse(raw) : {};
-const config = loadHarnessConfig();
-const { toolName, toolArgs, isCopilot } = parseHookInput(payload);
-
-if (isCopilot) {
-  process.exit(0);
-}
-
-let reason = null;
-if (/^(Edit|MultiEdit|Write|Read)$/i.test(toolName)) {
-  reason = getToolPaths(toolName, toolArgs)
-    .map((relativePath) => isProtectedPath(relativePath, config) || isProtectedExistingPath(relativePath, config))
-    .find(Boolean) || null;
-} else if (/^(Glob|Grep)$/i.test(toolName)) {
-  reason = getSearchPaths(toolArgs)
-    .map((relativePath) => isProtectedPath(relativePath, config) || isProtectedExistingPath(relativePath, config))
-    .find(Boolean) || null;
-} else if (/^Bash$/i.test(toolName)) {
-  reason = isDeniedCommand(toolArgs?.command || '', config);
-}
-
-if (reason) {
-  console.error(`Blocked by project policy: ${reason}`);
-  process.exit(2);
-}
-EOF
-
-  write_file "${TARGET_DIR}/.agentic/hooks/post-edit-check-copilot.mjs" <<'EOF'
-import { readStdin, loadHarnessConfig, parseHookInput, getToolPaths, getCommandPaths, selectPostEditCommands, runCommands, summarizeFailures } from './harness-lib.mjs';
-
-const raw = await readStdin();
-const payload = raw.trim() ? JSON.parse(raw) : {};
-const { toolName, toolArgs, isClaude } = parseHookInput(payload);
-if (isClaude) process.exit(0);
-
-const config = loadHarnessConfig();
-const relativePaths = /^(bash|powershell)$/i.test(toolName)
-  ? getCommandPaths(toolArgs?.command || '')
-  : getToolPaths(toolName, toolArgs);
-const commands = selectPostEditCommands(relativePaths, config);
-
-if (commands.length === 0) process.exit(0);
-
-const results = runCommands(commands);
-const failureSummary = summarizeFailures(results);
-if (failureSummary) {
-  process.stdout.write(JSON.stringify({
-    additionalContext: `Post-edit checks failed${relativePaths.length ? ` for ${relativePaths.join(', ')}` : ''}:\n${failureSummary}`,
-  }));
-}
-EOF
-
-  write_file "${TARGET_DIR}/.agentic/hooks/post-edit-check-claude.mjs" <<'EOF'
-import { readStdin, loadHarnessConfig, parseHookInput, getToolPaths, getCommandPaths, selectPostEditCommands, runCommands, summarizeFailures } from './harness-lib.mjs';
-
-const raw = await readStdin();
-const payload = raw.trim() ? JSON.parse(raw) : {};
-const { toolName, toolArgs, isCopilot } = parseHookInput(payload);
-if (isCopilot) {
-  process.exit(0);
-}
-
-const config = loadHarnessConfig();
-const relativePaths = /^(bash|powershell)$/i.test(toolName)
-  ? getCommandPaths(toolArgs?.command || '')
-  : getToolPaths(toolName, toolArgs);
-const commands = selectPostEditCommands(relativePaths, config);
-
-if (commands.length === 0) process.exit(0);
-
-const results = runCommands(commands);
-const failureSummary = summarizeFailures(results);
-if (failureSummary) {
-  process.stdout.write(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: 'PostToolUse',
-      additionalContext: `Post-edit checks failed${relativePaths.length ? ` for ${relativePaths.join(', ')}` : ''}:\n${failureSummary}`,
-    },
-  }));
-}
-EOF
-
-  write_file "${TARGET_DIR}/.agentic/hooks/stop-verify.mjs" <<'EOF'
-import { loadHarnessConfig, runCommands, summarizeFailures } from './harness-lib.mjs';
-
-const config = loadHarnessConfig();
-const commands = config.stopCommands || [];
-
-if (process.argv.includes('--dry-run')) {
-  process.stdout.write(JSON.stringify({ commands }, null, 2));
-  process.exit(0);
-}
-
-if (commands.length === 0) process.exit(0);
-
-const results = runCommands(commands);
-const failureSummary = summarizeFailures(results);
-if (failureSummary) {
-  process.stdout.write(JSON.stringify({
-    decision: 'block',
-    reason: `Verification failed:\n${failureSummary}`,
-  }));
-}
-EOF
-
-  write_file "${TARGET_DIR}/.agentic/hooks/stop-verify-claude.mjs" <<'EOF'
-import { readStdin, parseHookInput } from './harness-lib.mjs';
-import fs from 'node:fs';
-import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-
-const raw = await readStdin();
-const payload = raw.trim() ? JSON.parse(raw) : {};
-const { isCopilot } = parseHookInput(payload);
-
-if (isCopilot) {
-  process.exit(0);
-}
-
-const scriptPath = path.resolve(path.dirname(new URL(import.meta.url).pathname), 'stop-verify.mjs');
-const result = spawnSync('node', [scriptPath], {
-  cwd: process.cwd(),
-  encoding: 'utf8',
-  env: process.env,
-});
-
-if (result.error) {
-  console.error(result.error.message);
-  process.exit(1);
-}
-
-if (result.status !== 0) {
-  console.error(result.stderr || result.stdout || 'Verification hook failed.');
-  process.exit(result.status || 1);
-}
-
-const text = (result.stdout || '').trim();
-if (!text) {
-  process.exit(0);
-}
-
-const output = JSON.parse(text);
-if (output?.decision === 'block') {
-  process.stdout.write(JSON.stringify(output));
-}
-EOF
-
-  write_file "${TARGET_DIR}/.agentic/hooks/stop-verify-copilot.mjs" <<'EOF'
-import { readStdin, parseHookInput } from './harness-lib.mjs';
-import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-
-const raw = await readStdin();
-const payload = raw.trim() ? JSON.parse(raw) : {};
-const { isClaude } = parseHookInput(payload);
-
-if (isClaude) {
-  process.exit(0);
-}
-
-const scriptPath = path.resolve(path.dirname(new URL(import.meta.url).pathname), 'stop-verify.mjs');
-const result = spawnSync('node', [scriptPath], {
-  cwd: process.cwd(),
-  encoding: 'utf8',
-  env: process.env,
-});
-
-if (result.error) {
-  console.error(result.error.message);
-  process.exit(1);
-}
-
-if (result.status !== 0) {
-  console.error(result.stderr || result.stdout || 'Verification hook failed.');
-  process.exit(result.status || 1);
-}
-
-const text = (result.stdout || '').trim();
-if (text) {
-  process.stdout.write(text);
-}
-EOF
+  copy_checked_in_file ".agentic/hooks/harness-lib.mjs" "${TARGET_DIR}/.agentic/hooks/harness-lib.mjs"
+  copy_checked_in_file ".agentic/hooks/run-json-checks.mjs" "${TARGET_DIR}/.agentic/hooks/run-json-checks.mjs"
+  copy_checked_in_file ".agentic/hooks/run-node-checks.mjs" "${TARGET_DIR}/.agentic/hooks/run-node-checks.mjs"
+  copy_checked_in_file ".agentic/hooks/protect-files-copilot.mjs" "${TARGET_DIR}/.agentic/hooks/protect-files-copilot.mjs"
+  copy_checked_in_file ".agentic/hooks/protect-files-claude.mjs" "${TARGET_DIR}/.agentic/hooks/protect-files-claude.mjs"
+  copy_checked_in_file ".agentic/hooks/post-edit-check-copilot.mjs" "${TARGET_DIR}/.agentic/hooks/post-edit-check-copilot.mjs"
+  copy_checked_in_file ".agentic/hooks/post-edit-check-claude.mjs" "${TARGET_DIR}/.agentic/hooks/post-edit-check-claude.mjs"
+  copy_checked_in_file ".agentic/hooks/stop-verify.mjs" "${TARGET_DIR}/.agentic/hooks/stop-verify.mjs"
+  copy_checked_in_file ".agentic/hooks/stop-verify-claude.mjs" "${TARGET_DIR}/.agentic/hooks/stop-verify-claude.mjs"
+  copy_checked_in_file ".agentic/hooks/stop-verify-copilot.mjs" "${TARGET_DIR}/.agentic/hooks/stop-verify-copilot.mjs"
 
   write_file "${TARGET_DIR}/.claude/settings.json" <<EOF
 {
@@ -1076,7 +518,7 @@ EOF
       }
     ]
 JSON
-)$( [[ "${#stop_commands[@]}" -gt 0 ]] && cat <<'JSON'
+)$( [[ "${#post_edit_commands[@]}" -gt 0 ]] && cat <<'JSON'
 ,
     "Stop": [
       {
@@ -1120,7 +562,7 @@ EOF
         "type": "command",
         "command": "node .agentic/hooks/post-edit-check-copilot.mjs",
         "cwd": ".",
-        "timeoutSec": 30
+        "timeoutSec": 45
       }
     ]
   }
@@ -1128,7 +570,7 @@ EOF
 EOF
   fi
 
-  if [[ "${#stop_commands[@]}" -gt 0 ]]; then
+  if [[ "${#post_edit_commands[@]}" -gt 0 ]]; then
     write_file "${TARGET_DIR}/.github/hooks/stop-verify.json" <<'EOF'
 {
   "version": 1,
@@ -1138,7 +580,7 @@ EOF
         "type": "command",
         "command": "node .agentic/hooks/stop-verify-copilot.mjs",
         "cwd": ".",
-        "timeoutSec": 300
+        "timeoutSec": 90
       }
     ]
   }
@@ -1167,15 +609,16 @@ EOF
 
   write_file "${TARGET_DIR}/.github/instructions/contract-surfaces.instructions.md" <<'EOF'
 ---
-applyTo: "package.json,README.md,**/vite.config.*,**/next.config.*,scripts/**,src/app/api/**,prisma/schema.prisma,prisma/migrations/**,index.html,script.js,**/*.html"
+applyTo: "AGENTS.md,PROJECT-AGENTIC-INIT.md,.github/copilot-instructions.md,.github/hooks/*.json,.github/instructions/**/*.instructions.md,.agentic/harness.json,.agentic/hooks/*.mjs,.claude/settings.json,.claude/agents/*.md,.agents/skills/**/*.md,docs/agentic-eval-pack.md,docs/harness-token-optimization.md"
 ---
 
-When working on these files:
+These files define the repo-level agent contract.
 
-- treat them as contract surfaces
-- preserve existing naming and deployment assumptions unless the task explicitly changes them
-- mention any downstream surfaces that also need updating
-- use the smallest credible validation command after changes
+- Keep them aligned with `AGENTS.md`, `PROJECT-AGENTIC-INIT.md`, and `.agentic/harness.json`.
+- Keep automatic hooks fast, quiet, non-recursive, and easy to disable.
+- Only auto-wire stop hooks when cheap fast checks actually exist.
+- Avoid broad global instructions when a narrower `applyTo` pattern is enough.
+- Prefer the smallest credible validation command after changes.
 EOF
 
   write_file "${TARGET_DIR}/.claude/agents/project-fast-worker.md" <<EOF
@@ -1265,9 +708,10 @@ description: Choose and run the smallest useful verification flow for this repos
 
 1. Read `AGENTS.md` and `PROJECT-AGENTIC-INIT.md` if present.
 2. Read `.agentic/harness.json`.
-3. Choose the smallest credible validation commands from `stopCommands`.
-4. Run them.
-5. Report:
+3. Use automatic fast checks first when they cover the change.
+4. Run manual full checks only on explicit request, before a commit when asked, or once at the end of a larger task.
+5. Choose the smallest credible subset that proves the change.
+6. Report:
    - commands run
    - pass/fail
    - whether the change looks ready to commit
@@ -1287,7 +731,7 @@ Deployment is human-gated.
 
 1. Read `AGENTS.md` and `PROJECT-AGENTIC-INIT.md` if present.
 2. Read `.agentic/harness.json`.
-3. Run the repo's credible verification gate before deployment.
+3. Run the repo's manual full checks before deployment.
 4. Review deployment scripts and environment assumptions.
 
 ### Output

@@ -2,11 +2,7 @@
 
 Canonical project instructions live in `AGENTS.md`.
 
-If `PROJECT-AGENTIC-INIT.md` exists:
-
-1. treat it as the bootstrap contract for this repository
-2. use it to refine `AGENTS.md`, validation flow, guardrails, and eval coverage
-3. do not overwrite mature project rules blindly
+Keep this file short. Use `PROJECT-AGENTIC-INIT.md` for the detailed project contract and `docs/harness-token-optimization.md` for detailed hook behavior.
 
 Default expectations:
 
@@ -16,5 +12,6 @@ Default expectations:
 - use fresh verification output before success claims
 - use a review gate for non-trivial or high-risk changes
 - protect `.env`, secrets, generated output, local databases, and existing migrations where relevant
-- use `.github/hooks/*.json` and `.github/instructions/**/*.instructions.md` as the repo-local Copilot enforcement layer when present
-- keep changes bounded and architecture-aware
+- keep `.github/hooks/*.json`, `.github/instructions/**/*.instructions.md`, `.agentic/harness.json`, and `.agentic/hooks/` aligned
+- keep automatic hooks fast, quiet, non-recursive, and easy to disable
+- do not wire repo-wide lint, build, or test commands into automatic post-edit or stop hooks unless the repo declares a cheap targeted variant

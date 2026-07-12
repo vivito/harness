@@ -21,9 +21,19 @@ This eval pack is tailored to Harness.
 
 ## Expected validation
 
+### Fast automatic checks
+
 ```bash
-bash -n install.sh bin/agentic-project-init templates/test-harness.sh
+bash -n install.sh bin/agentic-project-init templates/test-harness.sh test-harness.sh
 node --check bin/apply-project-agentic-init.mjs
+node .agentic/hooks/run-node-checks.mjs .agentic/hooks/harness-lib.mjs .agentic/hooks/protect-files-copilot.mjs .agentic/hooks/protect-files-claude.mjs .agentic/hooks/post-edit-check-copilot.mjs .agentic/hooks/post-edit-check-claude.mjs .agentic/hooks/stop-verify.mjs .agentic/hooks/stop-verify-copilot.mjs .agentic/hooks/stop-verify-claude.mjs .agentic/hooks/run-json-checks.mjs .agentic/hooks/run-node-checks.mjs
+node .agentic/hooks/run-json-checks.mjs .agentic/harness.json .claude/settings.json .github/hooks/protect-files.json .github/hooks/post-edit-check.json .github/hooks/stop-verify.json
+```
+
+### Manual full checks
+
+```bash
+bash install.sh --help >/dev/null && ./bin/agentic-project-init --help >/dev/null
 tmpdir="$(mktemp -d)" && trap 'rm -rf "$tmpdir"' EXIT && ./bin/agentic-project-init "$tmpdir" --force >/dev/null && node bin/apply-project-agentic-init.mjs "$tmpdir" >/dev/null && bash "$tmpdir/test-harness.sh"
 ```
 

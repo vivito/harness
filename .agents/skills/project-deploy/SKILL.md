@@ -17,8 +17,7 @@ release and publish steps: please review; the repo does not document a dedicated
 ### Required checks before deployment
 
 ```text
-bash -n install.sh bin/agentic-project-init templates/test-harness.sh
-node --check bin/apply-project-agentic-init.mjs
+bash install.sh --help >/dev/null && ./bin/agentic-project-init --help >/dev/null
 tmpdir="$(mktemp -d)" && trap 'rm -rf "$tmpdir"' EXIT && ./bin/agentic-project-init "$tmpdir" --force >/dev/null && node bin/apply-project-agentic-init.mjs "$tmpdir" >/dev/null && bash "$tmpdir/test-harness.sh"
 ```
 

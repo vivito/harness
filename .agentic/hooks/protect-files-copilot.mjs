@@ -1,8 +1,22 @@
-import { readStdin, loadHarnessConfig, parseHookInput, getToolPaths, getSearchPaths, isProtectedPath, isProtectedExistingPath, isDeniedCommand } from './harness-lib.mjs';
+import { readStdin, loadHarnessConfig, parseHookInput, getToolPaths, getSearchPaths, isProtectedPath, isProtectedExistingPath, isDeniedCommand, areHooksDisabled, formatRuntimeError } from './harness-lib.mjs';
 
 const raw = await readStdin();
 const payload = raw.trim() ? JSON.parse(raw) : {};
-const config = loadHarnessConfig();
+let config;
+try {
+  config = loadHarnessConfig();
+} catch (error) {
+  process.stdout.write(JSON.stringify({
+    permissionDecision: 'deny',
+    permissionDecisionReason: `Harness hook configuration error: ${formatRuntimeError(error)}`,
+  }));
+  process.exit(0);
+}
+
+if (areHooksDisabled(config)) {
+  process.exit(0);
+}
+
 const { toolName, toolArgs } = parseHookInput(payload);
 
 let reason = null;

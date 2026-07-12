@@ -58,18 +58,21 @@ tmpdir="$(mktemp -d)" && trap 'rm -rf "$tmpdir"' EXIT && ./bin/agentic-project-i
 
 ### Cheap Post-Edit Checks
 
+Only list truly cheap, targeted commands here. If the repo only has full-project lint, build, or test commands, leave this block empty and keep those commands under Hard Stop Gates.
+
 ```bash
-bash -n install.sh bin/agentic-project-init templates/test-harness.sh
+bash -n install.sh bin/agentic-project-init templates/test-harness.sh test-harness.sh
 node --check bin/apply-project-agentic-init.mjs
-bash install.sh --help >/dev/null
-./bin/agentic-project-init --help >/dev/null
+node .agentic/hooks/run-node-checks.mjs .agentic/hooks/harness-lib.mjs .agentic/hooks/protect-files-copilot.mjs .agentic/hooks/protect-files-claude.mjs .agentic/hooks/post-edit-check-copilot.mjs .agentic/hooks/post-edit-check-claude.mjs .agentic/hooks/stop-verify.mjs .agentic/hooks/stop-verify-copilot.mjs .agentic/hooks/stop-verify-claude.mjs .agentic/hooks/run-json-checks.mjs .agentic/hooks/run-node-checks.mjs
+node .agentic/hooks/run-json-checks.mjs .agentic/harness.json .claude/settings.json .github/hooks/protect-files.json .github/hooks/post-edit-check.json .github/hooks/stop-verify.json
 ```
 
 ### Hard Stop Gates
 
+These are manual full checks for an explicit final pass, not default post-edit or every-stop checks.
+
 ```bash
-bash -n install.sh bin/agentic-project-init templates/test-harness.sh
-node --check bin/apply-project-agentic-init.mjs
+bash install.sh --help >/dev/null && ./bin/agentic-project-init --help >/dev/null
 tmpdir="$(mktemp -d)" && trap 'rm -rf "$tmpdir"' EXIT && ./bin/agentic-project-init "$tmpdir" --force >/dev/null && node bin/apply-project-agentic-init.mjs "$tmpdir" >/dev/null && bash "$tmpdir/test-harness.sh"
 ```
 
@@ -154,6 +157,7 @@ The bootstrap should create or maintain, where possible:
 - `.agents/skills/`
 - `.claude/skills/` (optional adapter)
 - `docs/agentic-eval-pack.md`
+- `docs/harness-token-optimization.md`
 - `test-harness.sh`
 
 ## 10. Hook Preferences

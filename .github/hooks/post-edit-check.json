@@ -6,7 +6,7 @@
         "type": "command",
         "command": "node .agentic/hooks/post-edit-check-copilot.mjs",
         "cwd": ".",
-        "timeoutSec": 120
+        "timeoutSec": 45
       }
     ]
   }

@@ -16,8 +16,8 @@ The target pattern is a **portable baseline plus dual enforcement layer** whenev
 Inside the enforcement layer, the preferred hook pattern is:
 
 1. **PreToolUse** -> protect secrets, generated output, local DBs, existing migrations, and dangerous paths
-2. **PostToolUse** -> run the smallest cheap post-edit check (formatter, linter, or syntax check)
-3. **Stop / agentStop** -> run the required verification gate before the session can end cleanly
+2. **PostToolUse** -> run the smallest cheap post-edit check only for relevant file writes
+3. **Stop / agentStop** -> run one cached fast final check per changed repo state; keep full checks manual by default
 
 ## Inputs to inspect first
 
@@ -72,6 +72,7 @@ Bootstrap the smallest coherent set that fits the repo:
 17. `.claude/skills/` adapter when the repo supports it
 18. extra stack-specific skills only when they add real leverage
 19. `docs/agentic-eval-pack.md` or `agentic-eval-pack.md` if the repo has no `docs/` folder
+20. `docs/harness-token-optimization.md` when automatic hooks or manual full checks are scaffolded
 
 ## Bootstrap rules
 
@@ -84,7 +85,8 @@ Infer:
 - generated or dangerous directories
 - deployment commands that should stay human-gated
 - cheap post-edit checks such as formatter, lint-on-file, or syntax checks
-- required stop-gate checks such as build, test, lint, prisma/schema validation
+- fast stop checks such as syntax, targeted lint, or schema validation
+- manual full checks such as build, smoke tests, or broader integration checks
 - high-risk contracts such as auth, routing, migrations, payments, sync, or customer data
 
 ### 2. Merge, don’t bulldoze
@@ -123,13 +125,14 @@ Do not stop at `protect-files.cjs` alone if the repository can support more:
 
 - **Always** scaffold a `PreToolUse` protection hook
 - Scaffold a **PostToolUse** hook when there is a cheap and deterministic post-edit action
-- Scaffold a **Stop / agentStop** hook when the repo has a meaningful verification gate
+- Scaffold a **Stop / agentStop** hook only when the repo has cheap fast checks that should run automatically
+- Support simple env toggles such as `HARNESS_HOOKS_DISABLED=1`, `HARNESS_FAST_CHECKS`, and `HARNESS_FULL_CHECKS`
 
 Examples:
 
 - formatter present -> `PostToolUse` can format edited files
 - linter or syntax checks present -> `PostToolUse` can run the smallest cheap check
-- build/test/lint command present -> `Stop` hook should enforce it before completion
+- build/test/lint command present but only as repo-wide commands -> keep them in manual full checks and do not auto-wire them into `PostToolUse` or `Stop`
 
 If no credible post-edit hook or stop-gate exists, explicitly say so in the result instead of pretending the setup is complete.
 
@@ -158,6 +161,8 @@ After scaffolding:
 - parse JSON settings
 - smoke-test `protect-files.cjs` with a blocked path like `.env` and confirm it fails closed
 - if the stop hook supports a dry-run mode, run it once to verify command selection
+- if the repo only has manual full checks, confirm `stop-verify` stays manual and no automatic stop hook was wired
+- confirm read/search/doc-only actions do not trigger post-edit checks
 - verify that `.claude/settings.json` and `.github/hooks/*.json` actually reference the generated hooks
 - report which files were created
 - if the repo is a real git repo, the user asked for implementation, and a credible verification gate exists, commit and push after validation

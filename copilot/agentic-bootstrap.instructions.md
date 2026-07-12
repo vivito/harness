@@ -11,6 +11,8 @@ If a repository contains `PROJECT-AGENTIC-INIT.md`, treat it as the bootstrap co
 5. If `.github/hooks/*.json`, `.github/instructions/**/*.instructions.md`, `.claude/settings.json`, `.agentic/harness.json`, `.agentic/hooks/`, or `.agents/skills/` exist, treat them as the technical guardrail layer and keep them aligned with the project contract.
 6. Treat `.agents/skills/` as the canonical repo-local skill source. If `.claude/skills/` exists, it should usually be an adapter to that directory.
    - When repo-local skills are scaffolded, keep the default baseline lean (`project-verify`, `project-deploy`, `project-contracts`) and add workflow checklist skills only when the repo clearly benefits from the extra latency.
+   - Keep auto-loaded instructions short and avoid duplicated rules across `AGENTS.md`, Copilot instructions, and file-specific instructions.
+   - Do not auto-wire repo-wide lint, build, or test commands into `PostToolUse` or `Stop`; keep them in manual full checks unless the repo provides a cheap targeted fast-check variant.
 7. Do not overwrite mature project-specific instructions blindly; merge carefully and stop on ambiguity.
 8. Keep deployment human-gated.
 9. Prefer the smallest credible validation.

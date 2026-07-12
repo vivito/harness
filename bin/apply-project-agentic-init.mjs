@@ -211,6 +211,65 @@ function extractGuardedCommand(value) {
   return looksLikeCommand(normalized) ? normalized : '';
 }
 
+function tokenizeShellWords(segment) {
+  return String(segment || '').match(/(?:[^\s"'`]+|"[^"]*"|'[^']*')+/g) || [];
+}
+
+function stripLeadingShellPrefixes(segment) {
+  let remaining = String(segment || '').trim();
+  while (/^(?:\/?[^/\s]+\/)*env\b/.test(remaining)) {
+    remaining = remaining.replace(/^(?:\/?[^/\s]+\/)*env\b\s*/, '').trimStart();
+    while (/^-[^\s]+\s+/.test(remaining)) {
+      remaining = remaining.replace(/^-[^\s]+\s+/, '').trimStart();
+    }
+    if (remaining.startsWith('-- ')) {
+      remaining = remaining.slice(3).trimStart();
+    } else if (remaining === '--') {
+      remaining = '';
+    }
+    while (/^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]+)\s*/.test(remaining)) {
+      remaining = remaining.replace(/^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]+)\s*/, '').trimStart();
+    }
+  }
+  while (true) {
+    const match = remaining.match(/^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]+)\s+/);
+    if (!match) break;
+    remaining = remaining.slice(match[0].length).trimStart();
+  }
+  return remaining;
+}
+
+function extractNestedShellCommand(segment) {
+  const match = String(segment || '').match(/^(?:\/?[^/\s]+\/)*(?:bash|sh)\b(?:\s+-[A-Za-z-]+\b)*\s+\$?(['"])([\s\S]*?)\1(?:\s+.*)?$/);
+  return match ? match[2] : '';
+}
+
+function normalizeRepoPath(candidatePath) {
+  if (!candidatePath) return '';
+  const absolute = path.resolve(projectDir, candidatePath);
+  const relative = path.relative(projectDir, absolute);
+  if (!relative || relative.startsWith('..')) return '';
+  return relative.split(path.sep).join('/');
+}
+
+function extractCommandPaths(command) {
+  const strippedCommand = stripLeadingShellPrefixes(command);
+  const nestedShellCommand = extractNestedShellCommand(strippedCommand);
+  const nestedPaths = nestedShellCommand ? extractCommandPaths(nestedShellCommand) : [];
+  const candidates = tokenizeShellWords(strippedCommand)
+    .map((token) => token.replace(/^['"`]+|['"`]+$/g, '').replace(/^[()]+|[()]+$/g, ''))
+    .filter((token) => (
+      token.includes('/')
+      || /\.(?:json|m?js|cjs|ts|tsx|jsx|sh|ya?ml|toml)$/i.test(token)
+      || fs.existsSync(path.resolve(projectDir, token))
+    ));
+
+  return uniqueItems([
+    ...nestedPaths,
+    ...candidates.map(normalizeRepoPath).filter(Boolean),
+  ]);
+}
+
 function writeFile(relativePath, content) {
   const fullPath = path.join(projectDir, relativePath);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
@@ -300,6 +359,39 @@ const desiredSkills = [
   ...extraSkills,
 ].filter((item) => item && !isReviewPlaceholder(item));
 const desiredSkillSet = new Set(desiredSkills.map((item) => String(item).trim().toLowerCase()));
+const defaultFastPatterns = [
+  'package.json',
+  'tsconfig.json',
+  'jsconfig.json',
+  'pyproject.toml',
+  'go.mod',
+  'Cargo.toml',
+  'composer.json',
+  'Gemfile',
+  'Gemfile.lock',
+  '*.sh',
+  '**/*.sh',
+  '*.js',
+  '**/*.js',
+  '*.mjs',
+  '**/*.mjs',
+  '*.cjs',
+  '**/*.cjs',
+  '*.ts',
+  '**/*.ts',
+  '*.tsx',
+  '**/*.tsx',
+  '*.jsx',
+  '**/*.jsx',
+  '*.json',
+  '**/*.json',
+  '*.yml',
+  '**/*.yml',
+  '*.yaml',
+  '**/*.yaml',
+  '*.toml',
+  '**/*.toml',
+];
 
 const protectedPrefixes = [];
 const protectedExistingPrefixes = [];
@@ -362,6 +454,33 @@ if (desiredSkillSet.has('requesting-code-review')) {
   };
 }
 
+const derivedPostEditPatterns = uniqueItems(postEditCommands.flatMap(extractCommandPaths));
+const postEditRules = postEditCommands.length > 0
+  ? [
+      {
+        name: 'relevant-fast-checks',
+        patterns: derivedPostEditPatterns.length > 0 ? derivedPostEditPatterns : defaultFastPatterns,
+        ignorePatterns: derivedPostEditPatterns.length > 0 ? [] : ['*.md', '**/*.md', 'docs/**'],
+        commands: Array.from(new Set(postEditCommands)),
+      },
+    ]
+  : [];
+const fullCheckCommands = Array.from(new Set(stopCommands));
+const hookSettings = {
+  disabledEnvVar: 'HARNESS_HOOKS_DISABLED',
+  fastChecksEnvVar: 'HARNESS_FAST_CHECKS',
+  fullChecksEnvVar: 'HARNESS_FULL_CHECKS',
+  recursiveGuardEnvVar: 'HARNESS_HOOK_ACTIVE',
+  stateDirEnvVar: 'HARNESS_HOOK_STATE_DIR',
+  postEditCooldownMs: 5000,
+  lockStaleMs: 120000,
+  maxOutputLines: 12,
+  maxOutputBytes: 4000,
+  maxBufferBytes: 131072,
+  fastTimeoutSec: 20,
+  fullTimeoutSec: 180,
+};
+
 const harness = {
   projectName,
   stackTags: [
@@ -374,8 +493,11 @@ const harness = {
   protectedExistingPrefixes: Array.from(new Set(protectedExistingPrefixes)),
   protectedRegexes: Array.from(new Set(protectedRegexes)),
   deniedCommandRegexes: Array.from(new Set(deniedCommandRegexes)),
+  hookSettings,
+  postEditRules,
   postEditCommands: Array.from(new Set(postEditCommands)),
-  stopCommands: Array.from(new Set(stopCommands)),
+  stopCommands: fullCheckCommands,
+  fullCheckCommands,
 };
 if (Object.keys(toolingPreferences).length > 0) {
   harness.toolingPreferences = toolingPreferences;
@@ -383,8 +505,8 @@ if (Object.keys(toolingPreferences).length > 0) {
 
 writeFile('.agentic/harness.json', `${JSON.stringify(harness, null, 2)}\n`);
 
-const hasPostEditChecks = postEditCommands.length > 0;
-const hasStopChecks = stopCommands.length > 0;
+const hasPostEditChecks = postEditRules.length > 0 || postEditCommands.length > 0;
+const hasStopChecks = hasPostEditChecks;
 
 if (hasPostEditChecks) {
   writeJson('.github/hooks/post-edit-check.json', {
@@ -395,7 +517,7 @@ if (hasPostEditChecks) {
           type: 'command',
           command: 'node .agentic/hooks/post-edit-check-copilot.mjs',
           cwd: '.',
-          timeoutSec: 120,
+          timeoutSec: 45,
         },
       ],
     },
@@ -413,7 +535,7 @@ if (hasStopChecks) {
           type: 'command',
           command: 'node .agentic/hooks/stop-verify-copilot.mjs',
           cwd: '.',
-          timeoutSec: 300,
+          timeoutSec: 90,
         },
       ],
     },
@@ -467,6 +589,8 @@ const highRiskList = Object.entries(highRisk)
   .map(([key, value]) => `- **${key}:** ${value}`);
 
 const skillBullets = desiredSkills.map((skill) => `- ${skill}`);
+const fastChecksBlock = postEditCommands.join('\n') || '# none defined';
+const fullChecksBlock = fullCheckCommands.join('\n') || '# none defined';
 const debuggingGuidance = desiredSkillSet.has('systematic-debugging')
   ? '- For bugs, failing tests, or surprising behavior, use a root-cause-first flow before changing code; the repo-local `systematic-debugging` skill is available when you want an explicit checklist.'
   : '- For bugs, failing tests, or surprising behavior, use a root-cause-first flow before changing code.';
@@ -481,105 +605,52 @@ writeFile(
   'AGENTS.md',
   `# ${projectName} - Agent Contract
 
-This file is the **canonical** instruction file for this project.
+This file is the canonical shared contract for this project.
+
+Use \`PROJECT-AGENTIC-INIT.md\` for detailed project facts, commands, guardrails, risks, language rules, and desired skills.
+Use \`docs/harness-token-optimization.md\` for detailed hook behavior.
 
 ## Primary sources
 
 1. \`AGENTS.md\` is the actively maintained shared contract.
-2. \`PROJECT-AGENTIC-INIT.md\` is the bootstrap contract and should stay aligned with it.
-3. \`.github/copilot-instructions.md\` adds Copilot-specific project context.
-4. \`CLAUDE.md\` and \`GEMINI.md\` remain thin mirrors of these rules.
+2. \`PROJECT-AGENTIC-INIT.md\` is the detailed bootstrap source for project facts and validation commands.
+3. \`.agentic/harness.json\` and \`.agentic/hooks/\` define the shared technical hook policy.
+4. \`.github/copilot-instructions.md\`, \`.github/instructions/**/*.instructions.md\`, \`CLAUDE.md\`, and \`GEMINI.md\` stay as thin overlays.
 
-## Project overview
+## Working defaults
 
-- **Name:** ${projectName}
-- **Short description:** ${shortDescription}
-- **Customer type / context:** ${customerContext}
-${goals.length ? goals.map((goal) => `- **Goal:** ${goal}`).join('\n') : ''}
-
-## Workflow defaults
-
+- Keep auto-loaded instructions lean and non-duplicated.
 - For bugs, regressions, or failing tests, establish the root cause before changing code.
+- Automatic hooks must stay cheap, quiet, non-recursive, and easy to disable with \`HARNESS_HOOKS_DISABLED=1\`.
+- Only use automatic fast checks when the repo has truly cheap targeted commands; repo-wide lint, build, or test belongs in manual full checks by default.
+- \`HARNESS_FAST_CHECKS\` controls automatic fast checks; \`HARNESS_FULL_CHECKS=1\` is for explicit full-check runs.
+- Deployment remains human-gated.
 - Before any success claim or handoff, run the smallest fresh verification that proves the claim.
-- For non-trivial or high-risk changes, route the result through a review gate before concluding.
 
-## Stack
+## Project snapshot
 
-- **Framework / Runtime:** ${frameworkRuntime}
-- **Frontend / Backend:** ${frontendBackend}
-- **Database / ORM:** ${databaseOrm}
+- ${shortDescription}
+- **Stack:** ${frameworkRuntime}
 - **Testing:** ${testing}
 - **Deployment target:** ${deploymentTarget}
 
-## Commands
+## Keep aligned when the setup changes
 
-\`\`\`bash
-${baseCommands.join('\n') || '# add in PROJECT-AGENTIC-INIT.md'}
-\`\`\`
-
-### Cheap post-edit checks
-
-\`\`\`bash
-${postEditCommands.join('\n') || '# none defined'}
-\`\`\`
-
-### Hard stop gates
-
-\`\`\`bash
-${stopCommands.join('\n') || '# none defined'}
-\`\`\`
+- \`PROJECT-AGENTIC-INIT.md\`
+- \`.agentic/harness.json\` and \`.agentic/hooks/*\`
+- \`.github/hooks/*.json\` and \`.github/instructions/**/*.instructions.md\`
+- \`.github/copilot-instructions.md\`, \`CLAUDE.md\`, \`GEMINI.md\`, \`docs/agentic-eval-pack.md\`, and \`docs/harness-token-optimization.md\`
 
 ## Guardrails
 
-### Do not edit automatically
+- Protect \`.env\`, secrets, generated output, deploy commands, and local databases or existing migrations when relevant.
+- Keep hook output short and never stream full build, test, lint, or dependency logs back into agent context.
 
-${protectedDisplayItems.map((item) => `- ${item}`).join('\n') || '- add entries'}
+## Verification model
 
-### Human-gated commands
-
-${deployRules.map((item) => `- ${item}`).join('\n') || '- add entries'}
-
-### Database / migration rules
-
-${dbRules.map((item) => `- ${item}`).join('\n') || '- no special rules documented'}
-
-## High-risk surfaces
-
-${highRiskList.join('\n') || '- add from PROJECT-AGENTIC-INIT.md'}
-
-## Architecture rules
-
-### Existing patterns
-${architectureExisting.map((item) => `- ${item}`).join('\n') || '- add entries'}
-
-### Preferred structure
-${architecturePreferred.map((item) => `- ${item}`).join('\n') || '- add entries'}
-
-### Do not introduce
-${architectureAvoid.map((item) => `- ${item}`).join('\n') || '- add entries'}
-
-## Language and copy rules
-
-- **Default language:** ${defaultLanguage}
-- **Tone / copy direction:** ${toneCopyDirection}
-- **i18n specifics:** ${i18nSpecifics}
-
-## Hook policy
-
-- **PreToolUse protection:** ${preToolUseProtection}
-- **PostToolUse checks:** ${postToolUseChecks}
-- **Stop gate with build/test/lint:** ${stopGateWithBuildTestLint}
-
-## Tool compatibility
-
-- \`.github/hooks/*.json\` + \`.github/instructions/**/*.instructions.md\` are the Copilot-specific enforcement layer.
-- \`.claude/settings.json\` and \`.claude/agents/\` are the Claude-specific enforcement layer.
-- \`.agents/skills/\` is the canonical skill source; \`.claude/skills/\` may act as an adapter to it.
-- \`.agentic/harness.json\` and \`.agentic/hooks/\` hold the shared technical policy for both tool ecosystems.
-
-## Desired skills
-
-${skillBullets.join('\n') || '- add from PROJECT-AGENTIC-INIT.md'}
+- Automatic fast checks are opt-in, path-scoped, and reserved for cheap deterministic commands.
+- Full validation stays manual by default and should be exposed through \`fullCheckCommands\`, not wired into every edit or agent stop.
+- Use \`docs/harness-token-optimization.md\` for the exact hook behavior and environment toggles.
 `
 );
 
@@ -587,29 +658,21 @@ writeFile(
   '.github/copilot-instructions.md',
   `# Copilot Instructions for ${projectName}
 
-Read \`AGENTS.md\` first. It is the canonical shared contract for this repository.
+Canonical contract: \`AGENTS.md\`.
 
-## Agentic Workflow
+Read \`PROJECT-AGENTIC-INIT.md\` for detailed repo facts and \`docs/harness-token-optimization.md\` for hook behavior.
 
-- Keep \`PROJECT-AGENTIC-INIT.md\`, \`AGENTS.md\`, \`CLAUDE.md\`, \`GEMINI.md\`, and \`docs/agentic-eval-pack.md\` aligned when the setup changes.
-- Respect the technical enforcement layer in \`.github/hooks/*.json\`, \`.github/instructions/**/*.instructions.md\`, and \`.agentic/harness.json\`.
+When changing the harness or repo-level agent setup:
+
+- keep \`PROJECT-AGENTIC-INIT.md\`, \`.agentic/harness.json\`, \`.agentic/hooks/\`, \`.github/hooks/*.json\`, and \`.github/instructions/**/*.instructions.md\` aligned
+- keep this file short and avoid duplicating detailed contract text here
+- automatic hooks must stay cheap, quiet, non-recursive, and easy to disable with \`HARNESS_HOOKS_DISABLED=1\`
+- do not wire repo-wide lint, build, or test commands into automatic post-edit or stop hooks; keep them as manual full checks unless the repo declares a cheap targeted variant
+- use \`HARNESS_FAST_CHECKS\` for automatic fast checks and \`HARNESS_FULL_CHECKS\` only for explicit full-check runs
 - ${debuggingGuidance.slice(2)}
 - ${completionGuidance.slice(2)}
 - ${reviewGuidance.slice(2)}
-- Keep the default workflow lean; only add repo-local checklist skills when the repository explicitly benefits from the extra ceremony.
-- Never run human-gated deployment commands without explicit approval.
-- Default to the smallest credible validation, using the stop-gate commands from the project contract.
-
-## Quick project summary
-
-- ${shortDescription}
-- Stack: ${frameworkRuntime}
-- Testing: ${testing}
-- Deployment: ${deploymentTarget}
-
-## High-risk reminders
-
-${highRiskList.join('\n') || '- add from PROJECT-AGENTIC-INIT.md'}
+- never run human-gated deployment commands without explicit approval
 `
 );
 
@@ -640,15 +703,84 @@ ${protectedDisplayItems.map((item) => `- ${item}`).join('\n') || '- Protect secr
 writeFile(
   '.github/instructions/contract-surfaces.instructions.md',
   `---
-applyTo: "**"
+applyTo: "AGENTS.md,PROJECT-AGENTIC-INIT.md,.github/copilot-instructions.md,.github/hooks/*.json,.github/instructions/**/*.instructions.md,.agentic/harness.json,.agentic/hooks/*.mjs,.claude/settings.json,.claude/agents/*.md,.agents/skills/**/*.md,docs/agentic-eval-pack.md,docs/harness-token-optimization.md"
 ---
 
-Treat the following as contract surfaces and update them carefully:
+These files define the repo-level agent contract.
 
-${highRiskList.join('\n') || '- supplement from PROJECT-AGENTIC-INIT.md'}
-
+- Keep them aligned with \`AGENTS.md\`, \`PROJECT-AGENTIC-INIT.md\`, and \`.agentic/harness.json\`.
+- Keep automatic hooks fast, quiet, non-recursive, and easy to disable.
+- Only auto-wire stop hooks when cheap fast checks actually exist.
+- Avoid broad global instructions when a narrower \`applyTo\` pattern is enough.
 - Prefer the smallest credible validation after changes.
-- Mention downstream surfaces that also need updates when relevant.
+`
+);
+
+writeFile(
+  'docs/harness-token-optimization.md',
+  `# Harness Token Optimization
+
+This document describes the reduced-noise hook model for ${projectName}.
+
+## Active automatic hooks
+
+| Hook | Default behavior | When it runs |
+| --- | --- | --- |
+| \`protect-files\` | Blocks protected paths and denied commands. | Before read, write, search, or bash tool usage, unless \`HARNESS_HOOKS_DISABLED=1\`. |
+| \`post-edit-check\` | ${hasPostEditChecks ? 'Runs fast checks only for matching write operations.' : 'Not wired automatically because no cheap fast checks are defined.'} | ${hasPostEditChecks ? 'After write-style tools on paths covered by `.agentic/harness.json > postEditRules`. Reads, searches, git queries, bash inspection, and docs-only edits are ignored.' : 'Manual full checks remain available through `.agentic/hooks/stop-verify.mjs` and the verify skill.'} |
+| \`stop-verify\` | ${hasStopChecks ? 'Runs one cached fast final check per changed relevant repo state.' : 'Not wired automatically because the repo currently exposes only manual full checks.'} | ${hasStopChecks ? 'On agent stop. Repeated stops on the same failed state return a short cached block instead of re-running commands.' : 'Manual only. Use `node .agentic/hooks/stop-verify.mjs --dry-run` to inspect commands and `HARNESS_FULL_CHECKS=1 node .agentic/hooks/stop-verify.mjs --full` when you explicitly want the full pass.'} |
+
+## Output limits
+
+- Successful hooks stay silent.
+- Failures return only summarized messages, capped by \`.agentic/harness.json > hookSettings.maxOutputLines\` and \`maxOutputBytes\`.
+- Full stdout and stderr logs from build, test, lint, or dependency commands are not written back into agent context.
+
+## Manual full checks
+
+Inspect the currently selected fast and full commands:
+
+\`\`\`bash
+node .agentic/hooks/stop-verify.mjs --dry-run
+\`\`\`
+
+Run the manual full-check pass once on demand:
+
+\`\`\`bash
+HARNESS_FULL_CHECKS=1 node .agentic/hooks/stop-verify.mjs --full
+\`\`\`
+
+Current full-check commands:
+
+\`\`\`bash
+${fullChecksBlock}
+\`\`\`
+
+## Temporary deactivation
+
+- Disable every automatic hook, including path protection:
+
+\`\`\`bash
+HARNESS_HOOKS_DISABLED=1
+\`\`\`
+
+- Disable only automatic fast checks:
+
+\`\`\`bash
+HARNESS_FAST_CHECKS=0
+\`\`\`
+
+- Opt into full checks for an explicit final pass:
+
+\`\`\`bash
+HARNESS_FULL_CHECKS=1
+\`\`\`
+
+## Loop and duplicate-run prevention
+
+- \`post-edit-check\` only reacts to write-style tools, uses a short cooldown, and skips identical command and state combinations.
+- \`stop-verify\` hashes the relevant changed repo state, stores the last result, and does not re-run after an unchanged failure.
+- Hook locks live in the temp state directory, prevent parallel duplicate runs, and stale locks expire automatically.
 `
 );
 
@@ -677,8 +809,16 @@ This eval pack is tailored to ${projectName}.
 
 ## Expected validation
 
+### Fast automatic checks
+
 \`\`\`bash
-${stopCommands.join('\n') || '# no stop gates defined'}
+${fastChecksBlock}
+\`\`\`
+
+### Manual full checks
+
+\`\`\`bash
+${fullChecksBlock}
 \`\`\`
 
 ## High-risk surfaces
@@ -802,14 +942,20 @@ description: Choose and run the smallest useful verification flow for ${projectN
 ## Instructions
 
 1. Read \`AGENTS.md\` and \`PROJECT-AGENTIC-INIT.md\`.
-2. Use the stop-gate commands from the harness config:
+2. Use automatic fast checks first when they cover the change:
 
 \`\`\`text
-${stopCommands.join('\n') || '(none documented)'}
+${fastChecksBlock}
 \`\`\`
 
-3. Run the smallest credible subset that proves the change.
-4. Report commands, result, and any remaining manual checks.
+3. Run manual full checks only when explicitly requested, before a commit when asked, or once at the end of a larger task:
+
+\`\`\`text
+${fullChecksBlock}
+\`\`\`
+
+4. Run the smallest credible subset that proves the change.
+5. Report commands, result, and any remaining manual checks.
 `
 );
 
@@ -834,7 +980,7 @@ ${deployRules.join('\n') || '(none documented)'}
 ### Required checks before deployment
 
 \`\`\`text
-${stopCommands.join('\n') || '(none documented)'}
+${fullChecksBlock}
 \`\`\`
 
 ### Report

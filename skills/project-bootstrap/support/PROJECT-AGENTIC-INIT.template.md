@@ -50,6 +50,7 @@ Use PROJECT-AGENTIC-INIT.md and bootstrap the agentic setup for this project.
 ### Cheap Post-Edit Checks
 
 Which inexpensive checks can the agent run directly after file edits?
+Only list truly cheap, targeted commands here. If the repo only has full-project lint, build, or test commands, leave this block empty and keep them under Hard Stop Gates.
 
 ```bash
 # formatter / lint / syntax-check
@@ -57,7 +58,7 @@ Which inexpensive checks can the agent run directly after file edits?
 
 ### Hard Stop Gates
 
-Which commands must be green before an agent may treat the state as "done"?
+Which manual full-check commands should be green before an agent may treat the state as "done" at the end of a larger task?
 
 ```bash
 # build / test / lint / schema-validate
@@ -131,6 +132,7 @@ The bootstrap should create, where possible:
 - `.agents/skills/`
 - `.claude/skills/` (optional adapter)
 - `docs/agentic-eval-pack.md`
+- `docs/harness-token-optimization.md`
 - `test-harness.sh`
 
 If something here does not make sense, the agent should explain it instead of creating it blindly.

@@ -87,7 +87,9 @@ harness_has_stop_checks() {
   node - <<'NODE' >/dev/null 2>&1
 const fs = require('node:fs');
 const data = JSON.parse(fs.readFileSync('.agentic/harness.json', 'utf8'));
-process.exit(Array.isArray(data.stopCommands) && data.stopCommands.length > 0 ? 0 : 1);
+const hasFast = (Array.isArray(data.postEditCommands) && data.postEditCommands.length > 0)
+  || (Array.isArray(data.postEditRules) && data.postEditRules.length > 0);
+process.exit(hasFast ? 0 : 1);
 NODE
 }
 
@@ -111,6 +113,7 @@ require_path "PROJECT-AGENTIC-INIT.md"
 require_path "AGENTS.md"
 require_path ".github/copilot-instructions.md"
 require_path "docs/agentic-eval-pack.md"
+require_path "docs/harness-token-optimization.md"
 require_path "test-harness.sh"
 
 if [[ -L "CLAUDE.md" ]]; then
@@ -227,12 +230,42 @@ if [[ -f ".agentic/hooks/protect-files-claude.mjs" ]]; then
   fi
 fi
 
+if [[ -f ".agentic/hooks/post-edit-check-copilot.mjs" ]]; then
+  result="$(printf '{"toolName":"read","toolArgs":{"path":"AGENTS.md"}}' | node .agentic/hooks/post-edit-check-copilot.mjs 2>/dev/null || true)"
+  if [[ -z "$result" ]]; then
+    pass "Copilot post-edit hook ignores read access"
+  else
+    fail "Copilot post-edit hook should ignore read access"
+  fi
+
+  result="$(printf '{"toolName":"edit","toolArgs":{"file_path":"AGENTS.md"}}' | node .agentic/hooks/post-edit-check-copilot.mjs 2>/dev/null || true)"
+  if [[ -z "$result" ]]; then
+    pass "Copilot post-edit hook ignores docs-only edits"
+  else
+    fail "Copilot post-edit hook should ignore docs-only edits"
+  fi
+fi
+
+if [[ -f ".agentic/hooks/protect-files-copilot.mjs" ]]; then
+  result="$(HARNESS_HOOKS_DISABLED=1 printf '{"toolName":"edit","toolArgs":{"file_path":".env"}}' | HARNESS_HOOKS_DISABLED=1 node .agentic/hooks/protect-files-copilot.mjs 2>/dev/null || true)"
+  if [[ -z "$result" ]]; then
+    pass "HARNESS_HOOKS_DISABLED bypasses automatic Copilot hooks"
+  else
+    fail "HARNESS_HOOKS_DISABLED should bypass automatic Copilot hooks"
+  fi
+fi
+
 if [[ -f ".agentic/hooks/stop-verify.mjs" ]]; then
   if output="$(node .agentic/hooks/stop-verify.mjs --dry-run 2>/dev/null)"; then
     if echo "$output" | grep -q '"commands"'; then
       pass "Stop verify dry-run returns commands"
     else
       warn "Stop verify dry-run returned no commands"
+    fi
+    if echo "$output" | grep -q '"fullCommands"'; then
+      pass "Stop verify dry-run exposes manual full checks"
+    else
+      fail "Stop verify dry-run should expose manual full checks"
     fi
   else
     fail "Stop verify dry-run failed"
@@ -273,7 +306,7 @@ const harness = JSON.parse(fs.readFileSync('.agentic/harness.json', 'utf8'));
 const hooks = settings.hooks || {};
 const hasPostChecks = (Array.isArray(harness.postEditCommands) && harness.postEditCommands.length > 0)
   || (Array.isArray(harness.postEditRules) && harness.postEditRules.length > 0);
-const hasStopChecks = Array.isArray(harness.stopCommands) && harness.stopCommands.length > 0;
+const hasStopChecks = hasPostChecks;
 if (!hooks.PreToolUse) process.exit(1);
 if (hasPostChecks && !hooks.PostToolUse) process.exit(2);
 if (hasStopChecks && !hooks.Stop) process.exit(3);

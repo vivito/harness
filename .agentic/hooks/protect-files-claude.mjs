@@ -1,11 +1,22 @@
-import { readStdin, loadHarnessConfig, parseHookInput, getToolPaths, getSearchPaths, isProtectedPath, isProtectedExistingPath, isDeniedCommand } from './harness-lib.mjs';
+import { readStdin, loadHarnessConfig, parseHookInput, getToolPaths, getSearchPaths, isProtectedPath, isProtectedExistingPath, isDeniedCommand, areHooksDisabled, formatRuntimeError } from './harness-lib.mjs';
 
 const raw = await readStdin();
 const payload = raw.trim() ? JSON.parse(raw) : {};
-const config = loadHarnessConfig();
 const { toolName, toolArgs, isCopilot } = parseHookInput(payload);
 
 if (isCopilot) {
+  process.exit(0);
+}
+
+let config;
+try {
+  config = loadHarnessConfig();
+} catch (error) {
+  console.error(`Blocked by project policy: Harness hook configuration error: ${formatRuntimeError(error)}`);
+  process.exit(2);
+}
+
+if (areHooksDisabled(config)) {
   process.exit(0);
 }
 

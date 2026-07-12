@@ -1,5 +1,4 @@
 import { readStdin, parseHookInput } from './harness-lib.mjs';
-import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -12,7 +11,7 @@ if (isCopilot) {
 }
 
 const scriptPath = path.resolve(path.dirname(new URL(import.meta.url).pathname), 'stop-verify.mjs');
-const result = spawnSync('node', [scriptPath], {
+const result = spawnSync('node', [scriptPath, ...process.argv.slice(2)], {
   cwd: process.cwd(),
   encoding: 'utf8',
   env: process.env,

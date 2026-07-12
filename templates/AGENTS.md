@@ -1,72 +1,29 @@
 # __PROJECT_NAME__ - Agent Contract
 
-This file is the **canonical** instruction file for this project.
+This file is the canonical shared contract for this project.
 
-If `PROJECT-AGENTIC-INIT.md` exists, it is the primary source for:
+Use `PROJECT-AGENTIC-INIT.md` for the detailed project facts, commands, guardrails, risks, and hook preferences.
+Use `docs/harness-token-optimization.md` for detailed hook behavior.
 
-- project overview
-- stack
-- validation commands
-- guardrails
-- high-risk surfaces
-- desired skills and hook layers
+## Working defaults
 
-## Working principles
-
-- Architecture, privacy, and final decisions stay in the trusted main lane.
-- Bounded, clearly scoped tasks may be delegated to cheaper worker lanes.
+- Keep auto-loaded instructions lean and non-duplicated.
 - For bugs, regressions, and failing tests, establish the root cause before changing code.
+- Prefer the smallest credible validation that proves the claim.
+- Keep hooks fast, quiet, non-recursive, and easy to disable when the repo explicitly allows it.
+- Keep repo-wide lint, build, and test commands out of automatic fast hooks unless the repo explicitly declares a cheap targeted variant.
 - Deployment remains human-gated.
-- Always run the smallest appropriate validation before finishing.
-- Before any success claim or handoff, use fresh verification output.
-- For non-trivial or high-risk changes, route the result through a review gate before concluding.
-- After a stable result, commit and push if the project uses Git.
+- Route non-trivial or high-risk results through a review gate before concluding.
 
-## Bootstrap rule
+## Required sources
 
-If this file still contains placeholders or gaps:
-
-1. read `PROJECT-AGENTIC-INIT.md`
-2. derive the project-specific rules from it
-3. complete the setup carefully
-4. do not overwrite existing project conventions blindly
-
-## Project overview
-
-- **Name:** __PROJECT_NAME__
-- **Short description:** copy from `PROJECT-AGENTIC-INIT.md`
-- **Important goals:** copy from `PROJECT-AGENTIC-INIT.md`
-
-## Validation
-
-The canonical commands live in `PROJECT-AGENTIC-INIT.md`.
-
-Rule:
-
-- start with the smallest credible check
-- keep builds, tests, lint, and schema checks as narrow as possible
+1. `AGENTS.md` is the shared contract.
+2. `PROJECT-AGENTIC-INIT.md` is the detailed bootstrap source when it exists.
+3. `.agentic/harness.json` and `.agentic/hooks/` define the shared hook policy.
+4. `.github/copilot-instructions.md`, `.github/instructions/**/*.instructions.md`, `CLAUDE.md`, and `GEMINI.md` stay as thin overlays.
 
 ## Guardrails
 
-At minimum, protect:
-
-- `.env*`
-- secrets
-- generated build output
-- deployment steps
-- local databases or existing migrations when relevant
-
-## Tool compatibility
-
-- `AGENTS.md` is the main source
-- `CLAUDE.md` and `GEMINI.md` may point to or mirror this file
-- `.github/copilot-instructions.md` adds Copilot-specific guidance but does not replace this file
-- `.github/hooks/*.json` and `.claude/settings.json` are the technical guardrail layers when the project uses an enforcement layer
-- `.agentic/harness.json` and `.agentic/hooks/` hold the shared hook and verify policy across tools
-
-## Still to be specified
-
-- stack-specific architecture rules
-- repo-specific high-risk surfaces
-- hook policy
-- eval pack
+- Protect `.env*`, secrets, generated output, deploy steps, and local databases or existing migrations when relevant.
+- Keep builds, tests, lint, and schema checks as narrow as possible.
+- Do not overwrite mature repo conventions blindly when refining this setup from `PROJECT-AGENTIC-INIT.md`.

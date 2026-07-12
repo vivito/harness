@@ -6,7 +6,7 @@
         "type": "command",
         "command": "node .agentic/hooks/stop-verify-copilot.mjs",
         "cwd": ".",
-        "timeoutSec": 300
+        "timeoutSec": 90
       }
     ]
   }

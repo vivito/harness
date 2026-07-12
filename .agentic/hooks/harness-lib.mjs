@@ -1,9 +1,26 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const HOOKS_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+const DEFAULT_HOOK_SETTINGS = {
+  disabledEnvVar: 'HARNESS_HOOKS_DISABLED',
+  fastChecksEnvVar: 'HARNESS_FAST_CHECKS',
+  fullChecksEnvVar: 'HARNESS_FULL_CHECKS',
+  recursiveGuardEnvVar: 'HARNESS_HOOK_ACTIVE',
+  stateDirEnvVar: 'HARNESS_HOOK_STATE_DIR',
+  postEditCooldownMs: 5000,
+  lockStaleMs: 120000,
+  maxOutputLines: 12,
+  maxOutputBytes: 4000,
+  maxBufferBytes: 131072,
+  fastTimeoutSec: 20,
+  fullTimeoutSec: 180,
+};
 
 export function getProjectRoot() {
   const rootFromEnv = process.env.CLAUDE_PROJECT_DIR || process.env.GITHUB_WORKSPACE;
@@ -28,6 +45,17 @@ export function loadHarnessConfig() {
   return JSON.parse(fs.readFileSync(configPath, 'utf8'));
 }
 
+export function getHookSettings(config = {}) {
+  return {
+    ...DEFAULT_HOOK_SETTINGS,
+    ...(config?.hookSettings || {}),
+  };
+}
+
+export function formatRuntimeError(error) {
+  return String(error?.message || error || 'unknown hook error').trim();
+}
+
 export function normalizePath(candidatePath) {
   if (!candidatePath) return '';
   const projectRoot = getProjectRoot();
@@ -37,8 +65,16 @@ export function normalizePath(candidatePath) {
   return relative.split(path.sep).join('/');
 }
 
+function uniqueItems(items) {
+  return [...new Set((items || []).filter(Boolean))];
+}
+
 function escapeRegex(source) {
   return source.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
+}
+
+function hashString(value) {
+  return crypto.createHash('sha1').update(String(value || ''), 'utf8').digest('hex');
 }
 
 export function matchesPathPattern(relativePath, pattern) {
@@ -80,7 +116,7 @@ export function getToolPaths(toolName, toolArgs) {
     toolArgs?.path,
   ];
 
-  return [...new Set(candidates.map(normalizePath).filter(Boolean))];
+  return uniqueItems(candidates.map(normalizePath).filter(Boolean));
 }
 
 export function getSearchPaths(toolArgs) {
@@ -90,7 +126,7 @@ export function getSearchPaths(toolArgs) {
       ? [toolArgs.paths]
       : [toolArgs?.path];
 
-  return [...new Set(rawPaths.map(normalizePath).filter(Boolean))];
+  return uniqueItems(rawPaths.map(normalizePath).filter(Boolean));
 }
 
 export function getCommandPaths(command) {
@@ -102,14 +138,14 @@ export function getCommandPaths(command) {
     .map((token) => token.replace(/^['"`]+|['"`]+$/g, '').replace(/^[()]+|[()]+$/g, ''))
     .filter((token) => (
       token.includes('/')
-      || /\.(?:md|json|js|mjs|sh|jsx|tsx|ts|css|sql)$/i.test(token)
+      || /\.(?:md|json|js|mjs|cjs|sh|jsx|tsx|ts|css|sql|yml|yaml|toml)$/i.test(token)
       || fs.existsSync(path.resolve(getProjectRoot(), token))
     ));
 
-  return [...new Set([
+  return uniqueItems([
     ...nestedPaths,
     ...candidates.map(normalizePath).filter(Boolean),
-  ])];
+  ]);
 }
 
 function tokenizeShellWords(segment) {
@@ -242,6 +278,310 @@ export function parseHookInput(payload) {
   return { toolName, toolArgs, hookEventName, isCopilot, isClaude };
 }
 
+function readBooleanEnv(name, fallback = false) {
+  if (!name) return fallback;
+  const raw = process.env[name];
+  if (raw == null || raw === '') return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
+export function areHooksDisabled(config = {}) {
+  const settings = getHookSettings(config);
+  return readBooleanEnv(settings.disabledEnvVar, false);
+}
+
+export function isFastChecksEnabled(config = {}) {
+  const settings = getHookSettings(config);
+  return readBooleanEnv(settings.fastChecksEnvVar, true);
+}
+
+export function isFullChecksEnabled(config = {}) {
+  const settings = getHookSettings(config);
+  return readBooleanEnv(settings.fullChecksEnvVar, false);
+}
+
+export function isRecursiveHookInvocation(config = {}) {
+  const settings = getHookSettings(config);
+  return readBooleanEnv(settings.recursiveGuardEnvVar, false);
+}
+
+export function isToolWriteOperation(toolName) {
+  return /^(edit|write|create|multiedit)$/i.test(toolName || '');
+}
+
+function filterRelevantPaths(relativePaths, includePatterns = [], ignorePatterns = []) {
+  const normalizedPaths = uniqueItems((relativePaths || []).map(normalizePath).filter(Boolean));
+  return normalizedPaths.filter((relativePath) => {
+    if (relativePath === '.' || relativePath === '..' || relativePath.startsWith('../')) {
+      return false;
+    }
+    if (ignorePatterns.some((pattern) => matchesPathPattern(relativePath, pattern))) {
+      return false;
+    }
+    if (includePatterns.length === 0) {
+      return true;
+    }
+    return includePatterns.some((pattern) => matchesPathPattern(relativePath, pattern));
+  });
+}
+
+function selectCommandsFromRules(relativePaths, rules) {
+  const normalizedPaths = uniqueItems((relativePaths || []).map(normalizePath).filter(Boolean));
+  const matchedCommands = [];
+  const matchedPaths = new Set();
+  const matchedRules = new Set();
+
+  for (const relativePath of normalizedPaths) {
+    for (const rule of rules || []) {
+      const patterns = Array.isArray(rule?.patterns) ? rule.patterns : [];
+      const ignorePatterns = Array.isArray(rule?.ignorePatterns) ? rule.ignorePatterns : [];
+      const commands = Array.isArray(rule?.commands) ? rule.commands : [];
+      if (ignorePatterns.some((pattern) => matchesPathPattern(relativePath, pattern))) {
+        continue;
+      }
+      if (patterns.length > 0 && !patterns.some((pattern) => matchesPathPattern(relativePath, pattern))) {
+        continue;
+      }
+      matchedPaths.add(relativePath);
+      matchedRules.add(String(rule?.name || relativePath));
+      matchedCommands.push(...commands);
+    }
+  }
+
+  return {
+    commands: uniqueItems(matchedCommands),
+    matchedPaths: [...matchedPaths],
+    matchedRules: [...matchedRules],
+  };
+}
+
+export function selectPostEditPlan(relativePaths, config) {
+  const rules = Array.isArray(config?.postEditRules) ? config.postEditRules : [];
+  if (rules.length > 0) {
+    return selectCommandsFromRules(relativePaths, rules);
+  }
+
+  const matchedPaths = filterRelevantPaths(
+    relativePaths,
+    Array.isArray(config?.postEditPatterns) ? config.postEditPatterns : [],
+    Array.isArray(config?.postEditIgnorePatterns) ? config.postEditIgnorePatterns : [],
+  );
+
+  return {
+    commands: matchedPaths.length > 0 && Array.isArray(config?.postEditCommands)
+      ? config.postEditCommands
+      : [],
+    matchedPaths,
+    matchedRules: matchedPaths.length > 0 ? ['legacy-post-edit'] : [],
+  };
+}
+
+export function selectPostEditCommands(relativePaths, config) {
+  return selectPostEditPlan(relativePaths, config).commands;
+}
+
+export function selectStopPlan(relativePaths, config) {
+  const rules = Array.isArray(config?.stopRules) && config.stopRules.length > 0
+    ? config.stopRules
+    : Array.isArray(config?.postEditRules)
+      ? config.postEditRules
+      : [];
+
+  if (rules.length > 0) {
+    return selectCommandsFromRules(relativePaths, rules);
+  }
+
+  const matchedPaths = filterRelevantPaths(
+    relativePaths,
+    Array.isArray(config?.stopPatterns) && config.stopPatterns.length > 0
+      ? config.stopPatterns
+      : Array.isArray(config?.postEditPatterns)
+        ? config.postEditPatterns
+        : [],
+    Array.isArray(config?.stopIgnorePatterns) && config.stopIgnorePatterns.length > 0
+      ? config.stopIgnorePatterns
+      : Array.isArray(config?.postEditIgnorePatterns)
+        ? config.postEditIgnorePatterns
+        : [],
+  );
+
+  const commands = Array.isArray(config?.stopFastCommands) && config.stopFastCommands.length > 0
+    ? config.stopFastCommands
+    : Array.isArray(config?.postEditCommands)
+      ? config.postEditCommands
+      : [];
+
+  return {
+    commands: matchedPaths.length > 0 ? commands : [],
+    matchedPaths,
+    matchedRules: matchedPaths.length > 0 ? ['fast-stop-fallback'] : [],
+  };
+}
+
+export function getFullCheckCommands(config) {
+  if (Array.isArray(config?.fullCheckCommands) && config.fullCheckCommands.length > 0) {
+    return config.fullCheckCommands;
+  }
+  return Array.isArray(config?.stopCommands) ? config.stopCommands : [];
+}
+
+export function normalizeCommandSpec(spec, timeoutSec) {
+  if (typeof spec === 'string') {
+    return {
+      label: spec.length > 60 ? `${spec.slice(0, 57)}...` : spec,
+      command: spec,
+      timeoutSec,
+    };
+  }
+
+  return {
+    label: String(spec?.label || spec?.command || 'check'),
+    command: String(spec?.command || ''),
+    timeoutSec: Number.isFinite(spec?.timeoutSec) ? Number(spec.timeoutSec) : timeoutSec,
+  };
+}
+
+export function serializeCommandSpecs(commands, config, tier = 'fast') {
+  const settings = getHookSettings(config);
+  const defaultTimeout = tier === 'full' ? settings.fullTimeoutSec : settings.fastTimeoutSec;
+  return (commands || [])
+    .map((command) => normalizeCommandSpec(command, defaultTimeout))
+    .filter((entry) => entry.command);
+}
+
+export function getCommandFingerprint(commands, tier = 'fast') {
+  return hashString(JSON.stringify({
+    tier,
+    commands: serializeCommandSpecs(commands, {}, tier).map(({ command, timeoutSec }) => ({ command, timeoutSec })),
+  }));
+}
+
+function getStateDir(config = {}) {
+  const settings = getHookSettings(config);
+  const configured = process.env[settings.stateDirEnvVar];
+  const baseDir = configured
+    ? path.resolve(configured)
+    : path.join(os.tmpdir(), 'harness-hooks', hashString(getProjectRoot()).slice(0, 12));
+  fs.mkdirSync(baseDir, { recursive: true });
+  return baseDir;
+}
+
+function getStatePath(config, name) {
+  return path.join(getStateDir(config), `${name}.json`);
+}
+
+function getLockPath(config, name) {
+  return path.join(getStateDir(config), `${name}.lock`);
+}
+
+export function readHookState(config, name) {
+  try {
+    return JSON.parse(fs.readFileSync(getStatePath(config, name), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+export function writeHookState(config, name, value) {
+  const targetPath = getStatePath(config, name);
+  const tempPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`);
+  fs.renameSync(tempPath, targetPath);
+}
+
+export function withLock(config, name, callback) {
+  const settings = getHookSettings(config);
+  const lockPath = getLockPath(config, name);
+
+  try {
+    const stats = fs.statSync(lockPath);
+    if ((Date.now() - stats.mtimeMs) > settings.lockStaleMs) {
+      fs.rmSync(lockPath, { recursive: true, force: true });
+    }
+  } catch {
+    // No existing lock.
+  }
+
+  try {
+    fs.mkdirSync(lockPath);
+  } catch (error) {
+    if (error?.code === 'EEXIST') {
+      return { acquired: false, value: null };
+    }
+    throw error;
+  }
+
+  try {
+    fs.writeFileSync(
+      path.join(lockPath, 'meta.json'),
+      `${JSON.stringify({ pid: process.pid, createdAt: Date.now() }, null, 2)}\n`,
+    );
+    return { acquired: true, value: callback() };
+  } finally {
+    fs.rmSync(lockPath, { recursive: true, force: true });
+  }
+}
+
+export function computePathStateHash(relativePaths) {
+  const descriptors = uniqueItems((relativePaths || []).map(normalizePath).filter(Boolean))
+    .map((relativePath) => {
+      const absolutePath = path.resolve(getProjectRoot(), relativePath);
+      try {
+        const stats = fs.statSync(absolutePath);
+        return {
+          path: relativePath,
+          size: stats.size,
+          mtimeMs: stats.mtimeMs,
+          isDirectory: stats.isDirectory(),
+        };
+      } catch {
+        return {
+          path: relativePath,
+          missing: true,
+        };
+      }
+    });
+  return hashString(JSON.stringify(descriptors));
+}
+
+export function getChangedRepoPaths() {
+  const result = spawnSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], {
+    cwd: getProjectRoot(),
+    encoding: 'buffer',
+    maxBuffer: 1024 * 1024,
+  });
+
+  if (result.error || result.status !== 0) {
+    return [];
+  }
+
+  const output = Buffer.isBuffer(result.stdout) ? result.stdout.toString('utf8') : String(result.stdout || '');
+  if (!output) return [];
+
+  const records = output.split('\0');
+  const changedPaths = [];
+
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) continue;
+    const status = record.slice(0, 2);
+    const pathValue = record.slice(3);
+
+    if ((status.startsWith('R') || status.startsWith('C')) && records[index + 1]) {
+      changedPaths.push(normalizePath(records[index + 1]));
+      index += 1;
+      continue;
+    }
+
+    changedPaths.push(normalizePath(pathValue));
+  }
+
+  return uniqueItems(changedPaths.filter(Boolean));
+}
+
 export function isProtectedPath(relativePath, config) {
   if (!relativePath) return null;
   if (relativePath === '.') {
@@ -334,7 +674,7 @@ export function isDeniedCommand(command, config) {
     return 'Command references a protected env file.';
   }
 
-  const mutatingSegment = segments.find((segment) => /(>|>>|\b(?:cp|mv|rm|touch|tee|truncate|install)\b|\bsed\b.*\s-i\b|\bperl\b.*\s-i\b)/.test(stripLeadingShellPrefixes(segment)));
+  const mutatingSegment = segments.find((segment) => /(>|>>|\b(?:cp|mv|rm|touch|tee|truncate|install)\b|\bpatch\b|\bsed\b.*\s-i\b|\bperl\b.*\s-i\b)/.test(stripLeadingShellPrefixes(segment)));
   if (mutatingSegment) {
     const strippedSegment = stripLeadingShellPrefixes(mutatingSegment);
     const protectedExistingReason = getCommandPaths(strippedSegment)
@@ -377,59 +717,84 @@ export function isDeniedCommand(command, config) {
   return null;
 }
 
-export function selectPostEditCommands(relativePaths, config) {
-  const rules = Array.isArray(config?.postEditRules) ? config.postEditRules : [];
-  const normalizedPaths = [...new Set((relativePaths || []).map(normalizePath).filter(Boolean))];
-  const matchedCommands = [];
-
-  for (const relativePath of normalizedPaths) {
-    for (const rule of rules) {
-      const patterns = Array.isArray(rule?.patterns) ? rule.patterns : [];
-      const commands = Array.isArray(rule?.commands) ? rule.commands : [];
-      if (patterns.some((pattern) => matchesPathPattern(relativePath, pattern))) {
-        matchedCommands.push(...commands);
-      }
-    }
-  }
-
-  if (matchedCommands.length > 0) {
-    return [...new Set(matchedCommands)];
-  }
-
-  if (rules.length > 0) {
-    return [];
-  }
-
-  return Array.isArray(config?.postEditCommands) ? config.postEditCommands : [];
-}
-
-export function runCommands(commands) {
+export function runCommands(commands, { config = {}, tier = 'fast' } = {}) {
+  const settings = getHookSettings(config);
+  const defaultTimeout = tier === 'full' ? settings.fullTimeoutSec : settings.fastTimeoutSec;
+  const recursiveGuardEnvVar = settings.recursiveGuardEnvVar;
   const results = [];
-  for (const command of commands || []) {
-    const result = spawnSync(command, {
+
+  for (const entry of serializeCommandSpecs(commands, config, tier)) {
+    const result = spawnSync(entry.command, {
       shell: true,
       cwd: getProjectRoot(),
       encoding: 'utf8',
-      env: process.env,
+      env: {
+        ...process.env,
+        ...(recursiveGuardEnvVar ? { [recursiveGuardEnvVar]: '1' } : {}),
+      },
+      timeout: entry.timeoutSec * 1000,
+      maxBuffer: settings.maxBufferBytes,
     });
+
     results.push({
-      command,
+      label: entry.label,
+      command: entry.command,
+      timeoutSec: entry.timeoutSec,
       status: typeof result.status === 'number' ? result.status : 1,
       stdout: result.stdout || '',
       stderr: result.stderr || '',
-      error: result.error ? String(result.error.message || result.error) : '',
+      error: result.error ? formatRuntimeError(result.error) : '',
+      timedOut: Boolean(result.error?.code === 'ETIMEDOUT'),
     });
+
     if (result.error || result.status !== 0) break;
   }
+
   return results;
 }
 
-export function summarizeFailures(results) {
+function trimOutput(text, config = {}) {
+  const settings = getHookSettings(config);
+  const normalized = String(text || '').replace(/\r/g, '').trim();
+  if (!normalized) return '';
+
+  let lines = normalized.split('\n');
+  if (lines.length > settings.maxOutputLines) {
+    lines = lines.slice(-settings.maxOutputLines);
+  }
+
+  let output = lines.join('\n');
+  while (Buffer.byteLength(output, 'utf8') > settings.maxOutputBytes && lines.length > 1) {
+    lines = lines.slice(1);
+    output = lines.join('\n');
+  }
+
+  if (Buffer.byteLength(output, 'utf8') > settings.maxOutputBytes) {
+    const bytes = Buffer.from(output, 'utf8');
+    output = bytes.subarray(bytes.length - settings.maxOutputBytes).toString('utf8');
+    const newlineIndex = output.indexOf('\n');
+    if (newlineIndex >= 0) {
+      output = output.slice(newlineIndex + 1);
+    }
+  }
+
+  return output.trim();
+}
+
+export function summarizeFailures(results, config = {}) {
   return (results || [])
     .filter((entry) => entry.status !== 0 || entry.error)
     .map((entry) => {
-      const details = [entry.stderr.trim(), entry.stdout.trim(), entry.error].filter(Boolean)[0] || 'unknown failure';
-      return `${entry.command}: ${details}`;
+      if (entry.timedOut) {
+        return `${entry.label}: timed out after ${entry.timeoutSec}s`;
+      }
+
+      const details = trimOutput(
+        entry.stderr || entry.stdout || entry.error || `exit ${entry.status}`,
+        config,
+      ) || `exit ${entry.status}`;
+
+      return `${entry.label}: ${details}`;
     })
     .join('\n');
 }

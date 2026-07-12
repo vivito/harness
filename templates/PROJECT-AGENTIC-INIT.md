@@ -41,11 +41,15 @@ Use PROJECT-AGENTIC-INIT.md and set up the agentic environment for this project.
 
 ### Cheap Post-Edit Checks
 
+Only list truly cheap, targeted commands here. If the repo only has full-project lint, build, or test commands, leave this block empty and keep those commands under Hard Stop Gates.
+
 ```bash
 # formatter / lint / syntax-check
 ```
 
 ### Hard Stop Gates
+
+Which manual full-check commands should be green before an agent may treat the state as "done" at the end of a larger task?
 
 ```bash
 # build / test / lint / schema-validate
@@ -117,6 +121,7 @@ The bootstrap should create or maintain, where possible:
 - `.agents/skills/`
 - `.claude/skills/` (optional adapter)
 - `docs/agentic-eval-pack.md`
+- `docs/harness-token-optimization.md`
 - `test-harness.sh`
 
 ## 10. Hook Preferences
