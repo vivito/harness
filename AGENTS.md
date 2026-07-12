@@ -17,7 +17,7 @@ Detailed hook behavior lives in `docs/harness-token-optimization.md`.
 - Keep auto-loaded instructions lean and non-duplicated.
 - For bugs, regressions, or failing tests, establish the root cause before changing code.
 - Automatic hooks must stay cheap, quiet, non-recursive, and easy to disable with `HARNESS_HOOKS_DISABLED=1`.
-- Only use automatic fast checks when the repo has truly cheap targeted commands; repo-wide lint/build/test belongs in manual full checks by default.
+- Only use automatic fast checks when the repo has truly cheap file-scoped commands; pathless lint/build/test commands belong in manual full checks by default.
 - `HARNESS_FAST_CHECKS` controls automatic fast checks; `HARNESS_FULL_CHECKS=1` is for explicit full-check runs.
 - Deployment, publish, and home-directory installation remain human-gated.
 - Before any success claim or handoff, run the smallest fresh verification that proves the claim.

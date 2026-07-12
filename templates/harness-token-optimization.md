@@ -7,10 +7,10 @@ This document describes the reduced-noise hook model for __PROJECT_NAME__.
 | Hook | Default behavior | When it runs |
 | --- | --- | --- |
 | `protect-files` | Blocks protected paths and denied commands. | Before read, write, search, or bash tool usage, unless `HARNESS_HOOKS_DISABLED=1`. |
-| `post-edit-check` | Runs fast checks only when the repo defines cheap fast checks. | After write-style tools on matching paths. Reads, searches, git queries, bash inspection, and docs-only edits are ignored. |
+| `post-edit-check` | Runs fast checks only when the repo defines cheap file-scoped fast checks. | After write-style tools on matching paths. Reads, searches, git queries, bash inspection, and docs-only edits are ignored. |
 | `stop-verify` | Runs one cached fast final check only when automatic fast checks exist. | On agent stop, at most once per changed relevant repo state. Repeated unchanged failures return a short cached block instead of re-running commands. |
 
-If the repo defines only manual full checks, omit `post-edit-check` and `stop-verify` from automatic hook wiring and keep `stop-verify.mjs` as a manual entry point only.
+If the repo defines only manual full checks, omit `post-edit-check` and `stop-verify` from automatic hook wiring and keep `stop-verify.mjs` as a manual entry point only. Commands listed under Cheap Post-Edit Checks without explicit repo paths or with unsupported glob syntax should be demoted into the manual full-check lane.
 
 ## Output limits
 

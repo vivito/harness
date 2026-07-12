@@ -259,7 +259,8 @@ function extractCommandPaths(command) {
   const candidates = tokenizeShellWords(strippedCommand)
     .map((token) => token.replace(/^['"`]+|['"`]+$/g, '').replace(/^[()]+|[()]+$/g, ''))
     .filter((token) => (
-      token.includes('/')
+      /[*?]/.test(token)
+      || token.includes('/')
       || /\.(?:json|m?js|cjs|ts|tsx|jsx|sh|ya?ml|toml)$/i.test(token)
       || fs.existsSync(path.resolve(projectDir, token))
     ));
@@ -268,6 +269,134 @@ function extractCommandPaths(command) {
     ...nestedPaths,
     ...candidates.map(normalizeRepoPath).filter(Boolean),
   ]);
+}
+
+function splitBraceOptions(source) {
+  const options = [];
+  let current = '';
+  let depth = 0;
+
+  for (const char of String(source || '')) {
+    if (char === ',' && depth === 0) {
+      options.push(current);
+      current = '';
+      continue;
+    }
+
+    if (char === '{') depth += 1;
+    if (char === '}') depth -= 1;
+    current += char;
+  }
+
+  options.push(current);
+  return options.filter(Boolean);
+}
+
+function expandBracePatterns(pattern) {
+  const source = String(pattern || '');
+  const openIndex = source.indexOf('{');
+  if (openIndex === -1) return [source];
+
+  let depth = 0;
+  let closeIndex = -1;
+  for (let index = openIndex; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        closeIndex = index;
+        break;
+      }
+    }
+  }
+
+  if (closeIndex === -1) return [];
+
+  const before = source.slice(0, openIndex);
+  const after = source.slice(closeIndex + 1);
+  const options = splitBraceOptions(source.slice(openIndex + 1, closeIndex));
+
+  return options.flatMap((option) => expandBracePatterns(`${before}${option}${after}`));
+}
+
+function usesUnsupportedBracketGlob(pattern) {
+  return /[\[\]]/.test(String(pattern || '')) && /[*?]/.test(String(pattern || ''));
+}
+
+function getScopedPostEditPatternResult(candidatePath) {
+  const normalized = normalizeRepoPath(candidatePath);
+  if (!normalized) {
+    return { patterns: [], unsupported: false };
+  }
+  const expandedPatterns = expandBracePatterns(normalized);
+  if (expandedPatterns.length === 0) {
+    return { patterns: [], unsupported: true };
+  }
+
+  const scopedPatterns = [];
+
+  for (const pattern of expandedPatterns) {
+    if (usesUnsupportedBracketGlob(pattern)) {
+      return { patterns: [], unsupported: true };
+    }
+
+    if (/[*?]/.test(pattern)) {
+      scopedPatterns.push(pattern);
+      continue;
+    }
+
+    try {
+      const stats = fs.statSync(path.resolve(projectDir, pattern));
+      if (stats.isDirectory()) {
+        scopedPatterns.push(`${pattern.replace(/\/+$/, '')}/**`);
+        continue;
+      }
+    } catch {
+      // Keep file-like paths as exact matches.
+    }
+
+    scopedPatterns.push(pattern);
+  }
+
+  return {
+    patterns: uniqueItems(scopedPatterns),
+    unsupported: false,
+  };
+}
+
+function analyzePostEditCommands(commands) {
+  const automaticCommands = [];
+  const demotedCommands = [];
+  const patterns = [];
+
+  for (const command of uniqueItems(commands)) {
+    const scopedPatterns = [];
+    let hasUnsupportedPattern = false;
+
+    for (const candidatePath of extractCommandPaths(command)) {
+      const result = getScopedPostEditPatternResult(candidatePath);
+      if (result.unsupported) {
+        hasUnsupportedPattern = true;
+        break;
+      }
+      scopedPatterns.push(...result.patterns);
+    }
+
+    if (hasUnsupportedPattern || scopedPatterns.length === 0) {
+      demotedCommands.push(command);
+      continue;
+    }
+
+    automaticCommands.push(command);
+    patterns.push(...uniqueItems(scopedPatterns));
+  }
+
+  return {
+    automaticCommands,
+    demotedCommands,
+    patterns: uniqueItems(patterns),
+  };
 }
 
 function writeFile(relativePath, content) {
@@ -338,7 +467,7 @@ const postEditBlock = extractFencedBlockAny(commandsSection, ['Cheap Post-Edit C
 const stopGateBlock = extractFencedBlockAny(commandsSection, ['Hard Stop Gates', 'Harte Stop-Gates']);
 
 const baseCommands = commandLinesFromBlock(commandBlock);
-const postEditCommands = commandLinesFromBlock(postEditBlock);
+const rawPostEditCommands = commandLinesFromBlock(postEditBlock);
 const stopCommands = commandLinesFromBlock(stopGateBlock);
 
 const protectedPaths = parseNestedListAny(guardrailsSection, ['Files or paths that must never be edited automatically', 'Dateien oder Pfade, die nie automatisch bearbeitet werden sollen']);
@@ -359,39 +488,6 @@ const desiredSkills = [
   ...extraSkills,
 ].filter((item) => item && !isReviewPlaceholder(item));
 const desiredSkillSet = new Set(desiredSkills.map((item) => String(item).trim().toLowerCase()));
-const defaultFastPatterns = [
-  'package.json',
-  'tsconfig.json',
-  'jsconfig.json',
-  'pyproject.toml',
-  'go.mod',
-  'Cargo.toml',
-  'composer.json',
-  'Gemfile',
-  'Gemfile.lock',
-  '*.sh',
-  '**/*.sh',
-  '*.js',
-  '**/*.js',
-  '*.mjs',
-  '**/*.mjs',
-  '*.cjs',
-  '**/*.cjs',
-  '*.ts',
-  '**/*.ts',
-  '*.tsx',
-  '**/*.tsx',
-  '*.jsx',
-  '**/*.jsx',
-  '*.json',
-  '**/*.json',
-  '*.yml',
-  '**/*.yml',
-  '*.yaml',
-  '**/*.yaml',
-  '*.toml',
-  '**/*.toml',
-];
 
 const protectedPrefixes = [];
 const protectedExistingPrefixes = [];
@@ -454,18 +550,26 @@ if (desiredSkillSet.has('requesting-code-review')) {
   };
 }
 
-const derivedPostEditPatterns = uniqueItems(postEditCommands.flatMap(extractCommandPaths));
+const {
+  automaticCommands: postEditCommands,
+  demotedCommands: demotedPostEditCommands,
+  patterns: derivedPostEditPatterns,
+} = analyzePostEditCommands(rawPostEditCommands);
+
 const postEditRules = postEditCommands.length > 0
   ? [
       {
         name: 'relevant-fast-checks',
-        patterns: derivedPostEditPatterns.length > 0 ? derivedPostEditPatterns : defaultFastPatterns,
-        ignorePatterns: derivedPostEditPatterns.length > 0 ? [] : ['*.md', '**/*.md', 'docs/**'],
+        patterns: derivedPostEditPatterns,
+        ignorePatterns: [],
         commands: Array.from(new Set(postEditCommands)),
       },
     ]
   : [];
-const fullCheckCommands = Array.from(new Set(stopCommands));
+const fullCheckCommands = Array.from(new Set([
+  ...stopCommands,
+  ...demotedPostEditCommands,
+]));
 const hookSettings = {
   disabledEnvVar: 'HARNESS_HOOKS_DISABLED',
   fastChecksEnvVar: 'HARNESS_FAST_CHECKS',
@@ -499,6 +603,9 @@ const harness = {
   stopCommands: fullCheckCommands,
   fullCheckCommands,
 };
+if (demotedPostEditCommands.length > 0) {
+  harness.demotedPostEditCommands = demotedPostEditCommands;
+}
 if (Object.keys(toolingPreferences).length > 0) {
   harness.toolingPreferences = toolingPreferences;
 }
@@ -591,6 +698,7 @@ const highRiskList = Object.entries(highRisk)
 const skillBullets = desiredSkills.map((skill) => `- ${skill}`);
 const fastChecksBlock = postEditCommands.join('\n') || '# none defined';
 const fullChecksBlock = fullCheckCommands.join('\n') || '# none defined';
+const demotedChecksBlock = demotedPostEditCommands.join('\n');
 const debuggingGuidance = desiredSkillSet.has('systematic-debugging')
   ? '- For bugs, failing tests, or surprising behavior, use a root-cause-first flow before changing code; the repo-local `systematic-debugging` skill is available when you want an explicit checklist.'
   : '- For bugs, failing tests, or surprising behavior, use a root-cause-first flow before changing code.';
@@ -622,7 +730,7 @@ Use \`docs/harness-token-optimization.md\` for detailed hook behavior.
 - Keep auto-loaded instructions lean and non-duplicated.
 - For bugs, regressions, or failing tests, establish the root cause before changing code.
 - Automatic hooks must stay cheap, quiet, non-recursive, and easy to disable with \`HARNESS_HOOKS_DISABLED=1\`.
-- Only use automatic fast checks when the repo has truly cheap targeted commands; repo-wide lint, build, or test belongs in manual full checks by default.
+- Only use automatic fast checks when the repo has truly cheap file-scoped commands; pathless lint, build, or test commands belong in manual full checks by default.
 - \`HARNESS_FAST_CHECKS\` controls automatic fast checks; \`HARNESS_FULL_CHECKS=1\` is for explicit full-check runs.
 - Deployment remains human-gated.
 - Before any success claim or handoff, run the smallest fresh verification that proves the claim.
@@ -667,7 +775,7 @@ When changing the harness or repo-level agent setup:
 - keep \`PROJECT-AGENTIC-INIT.md\`, \`.agentic/harness.json\`, \`.agentic/hooks/\`, \`.github/hooks/*.json\`, and \`.github/instructions/**/*.instructions.md\` aligned
 - keep this file short and avoid duplicating detailed contract text here
 - automatic hooks must stay cheap, quiet, non-recursive, and easy to disable with \`HARNESS_HOOKS_DISABLED=1\`
-- do not wire repo-wide lint, build, or test commands into automatic post-edit or stop hooks; keep them as manual full checks unless the repo declares a cheap targeted variant
+- do not wire pathless or repo-wide lint, build, or test commands into automatic post-edit or stop hooks; keep them as manual full checks unless the repo declares a cheap file-scoped variant
 - use \`HARNESS_FAST_CHECKS\` for automatic fast checks and \`HARNESS_FULL_CHECKS\` only for explicit full-check runs
 - ${debuggingGuidance.slice(2)}
 - ${completionGuidance.slice(2)}
@@ -711,6 +819,7 @@ These files define the repo-level agent contract.
 - Keep them aligned with \`AGENTS.md\`, \`PROJECT-AGENTIC-INIT.md\`, and \`.agentic/harness.json\`.
 - Keep automatic hooks fast, quiet, non-recursive, and easy to disable.
 - Only auto-wire stop hooks when cheap fast checks actually exist.
+- Only treat file-scoped post-edit commands as cheap fast checks.
 - Avoid broad global instructions when a narrower \`applyTo\` pattern is enough.
 - Prefer the smallest credible validation after changes.
 `
@@ -727,10 +836,20 @@ This document describes the reduced-noise hook model for ${projectName}.
 | Hook | Default behavior | When it runs |
 | --- | --- | --- |
 | \`protect-files\` | Blocks protected paths and denied commands. | Before read, write, search, or bash tool usage, unless \`HARNESS_HOOKS_DISABLED=1\`. |
-| \`post-edit-check\` | ${hasPostEditChecks ? 'Runs fast checks only for matching write operations.' : 'Not wired automatically because no cheap fast checks are defined.'} | ${hasPostEditChecks ? 'After write-style tools on paths covered by `.agentic/harness.json > postEditRules`. Reads, searches, git queries, bash inspection, and docs-only edits are ignored.' : 'Manual full checks remain available through `.agentic/hooks/stop-verify.mjs` and the verify skill.'} |
+| \`post-edit-check\` | ${hasPostEditChecks ? 'Runs fast checks only for matching write operations using file-scoped command patterns.' : 'Not wired automatically because no cheap fast checks are defined.'} | ${hasPostEditChecks ? 'After write-style tools on paths covered by `.agentic/harness.json > postEditRules`. Reads, searches, git queries, bash inspection, and docs-only edits are ignored.' : 'Manual full checks remain available through `.agentic/hooks/stop-verify.mjs` and the verify skill.'} |
 | \`stop-verify\` | ${hasStopChecks ? 'Runs one cached fast final check per changed relevant repo state.' : 'Not wired automatically because the repo currently exposes only manual full checks.'} | ${hasStopChecks ? 'On agent stop. Repeated stops on the same failed state return a short cached block instead of re-running commands.' : 'Manual only. Use `node .agentic/hooks/stop-verify.mjs --dry-run` to inspect commands and `HARNESS_FULL_CHECKS=1 node .agentic/hooks/stop-verify.mjs --full` when you explicitly want the full pass.'} |
 
-## Output limits
+${demotedPostEditCommands.length > 0 ? `## Commands moved out of the automatic fast lane
+
+These commands were listed under Cheap Post-Edit Checks but were not auto-wired because they do not reference explicit repo paths or use harness-trackable glob syntax:
+
+\`\`\`bash
+${demotedChecksBlock}
+\`\`\`
+
+They were added to the manual full-check lane instead.
+
+` : ''}## Output limits
 
 - Successful hooks stay silent.
 - Failures return only summarized messages, capped by \`.agentic/harness.json > hookSettings.maxOutputLines\` and \`maxOutputBytes\`.

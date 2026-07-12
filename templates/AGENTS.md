@@ -11,7 +11,7 @@ Use `docs/harness-token-optimization.md` for detailed hook behavior.
 - For bugs, regressions, and failing tests, establish the root cause before changing code.
 - Prefer the smallest credible validation that proves the claim.
 - Keep hooks fast, quiet, non-recursive, and easy to disable when the repo explicitly allows it.
-- Keep repo-wide lint, build, and test commands out of automatic fast hooks unless the repo explicitly declares a cheap targeted variant.
+- Keep pathless or repo-wide lint, build, and test commands out of automatic fast hooks unless the repo explicitly declares a cheap file-scoped variant.
 - Deployment remains human-gated.
 - Route non-trivial or high-risk results through a review gate before concluding.
 

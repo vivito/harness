@@ -7,5 +7,6 @@ These files define the repo-level agent contract.
 - Keep them aligned with `AGENTS.md`, `PROJECT-AGENTIC-INIT.md`, and `.agentic/harness.json`.
 - Keep automatic hooks fast, quiet, non-recursive, and easy to disable.
 - Only auto-wire stop hooks when cheap fast checks actually exist.
+- Only treat file-scoped post-edit commands as cheap fast checks.
 - Avoid broad global instructions when a narrower `applyTo` pattern is enough.
 - Prefer the smallest credible validation after changes.

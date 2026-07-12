@@ -58,7 +58,7 @@ tmpdir="$(mktemp -d)" && trap 'rm -rf "$tmpdir"' EXIT && ./bin/agentic-project-i
 
 ### Cheap Post-Edit Checks
 
-Only list truly cheap, targeted commands here. If the repo only has full-project lint, build, or test commands, leave this block empty and keep those commands under Hard Stop Gates.
+Only list truly cheap, file-scoped commands here. Commands without explicit repo paths or harness-trackable globs are treated as manual full checks even if they are listed in this block. If the repo only has full-project lint, build, or test commands, leave this block empty and keep those commands under Hard Stop Gates.
 
 ```bash
 bash -n install.sh bin/agentic-project-init templates/test-harness.sh test-harness.sh

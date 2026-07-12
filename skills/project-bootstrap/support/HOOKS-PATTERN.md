@@ -47,7 +47,7 @@ Recommended file:
 - `.agentic/hooks/post-edit-check-claude.mjs`
 
 Use this layer only if the repo has a cheap post-edit command. Do not put a full test suite here.
-Do not put repo-wide lint, build, or test commands here unless the repo provides an intentionally cheap targeted variant.
+Do not put pathless or repo-wide lint, build, or test commands here unless the repo provides an intentionally cheap file-scoped variant.
 
 ## 3. Stop
 
@@ -70,7 +70,7 @@ Best practice:
 
 - support `--dry-run` to print selected commands without running them
 - only wire the automatic stop hook when at least one cheap fast check exists
-- keep full-project lint, build, test, smoke, or integration commands in manual full checks
+- keep pathless or full-project lint, build, test, smoke, or integration commands in manual full checks
 - run manual full checks only on explicit request or at the end of larger tasks
 - return a short cached failure message for unchanged failing repo states instead of re-running
 - fail non-zero when any required command fails

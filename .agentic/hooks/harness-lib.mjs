@@ -86,8 +86,14 @@ export function matchesPathPattern(relativePath, pattern) {
     if (char === '*') {
       const next = pattern[index + 1];
       if (next === '*') {
-        source += '.*';
-        index += 1;
+        const after = pattern[index + 2];
+        if (after === '/') {
+          source += '(?:[^/]+/)*';
+          index += 2;
+        } else {
+          source += '.*';
+          index += 1;
+        }
       } else {
         source += '[^/]*';
       }

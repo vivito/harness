@@ -7,10 +7,10 @@ This document describes the reduced-noise hook model used in this repository.
 | Hook | Default behavior | When it runs |
 | --- | --- | --- |
 | `protect-files` | Blocks protected paths and denied commands. | Before read, write, search, or bash tool usage, unless `HARNESS_HOOKS_DISABLED=1`. |
-| `post-edit-check` | Runs fast checks only for matching write operations. | After `Edit`, `MultiEdit`, `Write`, or `Create` on paths covered by `.agentic/harness.json > postEditRules`. Reads, searches, git queries, bash inspection, and docs-only edits are ignored. |
+| `post-edit-check` | Runs fast checks only for matching write operations using file-scoped command patterns. | After `Edit`, `MultiEdit`, `Write`, or `Create` on paths covered by `.agentic/harness.json > postEditRules`. Reads, searches, git queries, bash inspection, and docs-only edits are ignored. |
 | `stop-verify` | Runs one cached fast final check per changed relevant repo state. | On agent stop, but only because this repo defines cheap fast checks. Repeated stops on the same failed state return a short cached block instead of re-running commands. |
 
-In generated repos, `post-edit-check` and `stop-verify` should be omitted entirely when the repo has no cheap fast checks. Full-check-only repos keep the script for manual use but do not wire an automatic stop hook.
+In generated repos, `post-edit-check` and `stop-verify` should be omitted entirely when the repo has no cheap file-scoped fast checks. Commands listed under Cheap Post-Edit Checks without explicit repo paths or with unsupported glob syntax are demoted into the manual full-check lane. Full-check-only repos keep the script for manual use but do not wire an automatic stop hook.
 
 ## Output limits
 

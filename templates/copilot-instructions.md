@@ -14,4 +14,4 @@ Default expectations:
 - protect `.env`, secrets, generated output, local databases, and existing migrations where relevant
 - keep `.github/hooks/*.json`, `.github/instructions/**/*.instructions.md`, `.agentic/harness.json`, and `.agentic/hooks/` aligned
 - keep automatic hooks fast, quiet, non-recursive, and easy to disable
-- do not wire repo-wide lint, build, or test commands into automatic post-edit or stop hooks unless the repo declares a cheap targeted variant
+- do not wire pathless or repo-wide lint, build, or test commands into automatic post-edit or stop hooks unless the repo declares a cheap file-scoped variant

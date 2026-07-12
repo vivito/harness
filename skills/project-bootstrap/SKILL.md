@@ -127,12 +127,13 @@ Do not stop at `protect-files.cjs` alone if the repository can support more:
 - Scaffold a **PostToolUse** hook when there is a cheap and deterministic post-edit action
 - Scaffold a **Stop / agentStop** hook only when the repo has cheap fast checks that should run automatically
 - Support simple env toggles such as `HARNESS_HOOKS_DISABLED=1`, `HARNESS_FAST_CHECKS`, and `HARNESS_FULL_CHECKS`
+- Commands listed under Cheap Post-Edit Checks without explicit repo paths or with unsupported glob syntax should be demoted into manual full checks instead of being auto-wired.
 
 Examples:
 
 - formatter present -> `PostToolUse` can format edited files
 - linter or syntax checks present -> `PostToolUse` can run the smallest cheap check
-- build/test/lint command present but only as repo-wide commands -> keep them in manual full checks and do not auto-wire them into `PostToolUse` or `Stop`
+- build/test/lint command present but only as pathless or repo-wide commands -> keep them in manual full checks and do not auto-wire them into `PostToolUse` or `Stop`
 
 If no credible post-edit hook or stop-gate exists, explicitly say so in the result instead of pretending the setup is complete.
 

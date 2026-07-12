@@ -328,6 +328,467 @@ NODE
   fi
 fi
 
+if [[ -f "bin/agentic-project-init" && -f "bin/apply-project-agentic-init.mjs" && -f "templates/harness-token-optimization.md" ]]; then
+  fixture_dir="$(mktemp -d)"
+  if ./bin/agentic-project-init "$fixture_dir" --force >/dev/null 2>&1; then
+    cat > "$fixture_dir/PROJECT-AGENTIC-INIT.md" <<'EOF'
+# PROJECT-AGENTIC-INIT
+
+## 1. Project Overview
+
+- **Project Name:** Fixture
+- **Short Description:** Fixture repo for harness compiler checks.
+- **Customer Type / Context:** Test fixture
+
+## 2. Tech Stack
+
+- **Framework / Runtime:** Node.js
+- **Frontend / Backend:** none
+- **Database / ORM:** none
+- **Testing:** npm
+- **Deployment Target:** local
+
+## 3. Important Commands
+
+```bash
+npm run lint
+npm run test
+```
+
+### Cheap Post-Edit Checks
+
+```bash
+npm run lint
+```
+
+### Hard Stop Gates
+
+```bash
+npm run test
+```
+
+## 4. Hard Boundaries / Guardrails
+
+- Files or paths that must never be edited automatically:
+  - .env
+- Secrets / environment files:
+  - .env
+- Deployment / production commands that always require human approval:
+  - git push
+- Database / migration rules:
+  - none
+
+## 5. High-Risk Surfaces
+
+- Auth: none
+- Routing: none
+- Payments / orders: none
+- Customer or personal data: none
+- External APIs / SSO / sync: none
+- Other critical flows: none
+
+## 6. Architecture Rules
+
+- existing patterns the agent should respect:
+  - keep hooks lightweight
+- preferred structure:
+  - keep pathless checks manual
+- things the agent should not introduce:
+  - broad automatic hook checks
+
+## 7. Language and Copy Rules
+
+- Default language: English
+- Tone / Copy direction: concise
+- i18n specifics: none
+
+## 8. Desired Skills
+
+- Verify Skill: yes
+- Deploy Skill: yes
+- Surface Skill: no
+- Contract Skill: yes
+
+## 9. Desired Output
+
+- `AGENTS.md`
+- `.github/copilot-instructions.md`
+- `.agentic/harness.json`
+- `docs/harness-token-optimization.md`
+
+## 10. Hook Preferences
+
+- PreToolUse protection: yes
+- PostToolUse checks: yes
+- Stop gate with build/test/lint: yes
+EOF
+
+    mkdir -p "$fixture_dir/app/[slug]"
+    : > "$fixture_dir/app/[slug]/page.tsx"
+
+    if node bin/apply-project-agentic-init.mjs "$fixture_dir" >/dev/null 2>&1; then
+      if node - "$fixture_dir" <<'NODE' >/dev/null 2>&1
+const fs = require('node:fs');
+const path = require('node:path');
+const dir = process.argv[2];
+const harness = JSON.parse(fs.readFileSync(path.join(dir, '.agentic/harness.json'), 'utf8'));
+if ((harness.postEditCommands || []).length !== 0) process.exit(1);
+if (!(harness.fullCheckCommands || []).includes('npm run lint')) process.exit(2);
+if (!(harness.demotedPostEditCommands || []).includes('npm run lint')) process.exit(3);
+process.exit(0);
+NODE
+      then
+        pass "Pathless post-edit commands are demoted to manual full checks"
+      else
+        status=$?
+        if [[ "$status" -eq 1 ]]; then
+          fail "Pathless post-edit commands should not stay in automatic post-edit checks"
+        elif [[ "$status" -eq 2 ]]; then
+          fail "Demoted post-edit commands should move into full checks"
+        elif [[ "$status" -eq 3 ]]; then
+          fail "Harness should record demoted post-edit commands"
+        else
+          fail "Unexpected failure while checking demoted post-edit commands"
+        fi
+      fi
+
+      if [[ ! -f "$fixture_dir/.github/hooks/post-edit-check.json" ]]; then
+        pass "Pathless post-edit commands do not wire an automatic post-edit hook"
+      else
+        fail "Pathless post-edit commands should not wire an automatic post-edit hook"
+      fi
+
+      if [[ ! -f "$fixture_dir/.github/hooks/stop-verify.json" ]]; then
+        pass "Pathless post-edit commands do not wire an automatic stop hook"
+      else
+        fail "Pathless post-edit commands should not wire an automatic stop hook"
+      fi
+
+      if grep -Fq "Commands moved out of the automatic fast lane" "$fixture_dir/docs/harness-token-optimization.md"; then
+        pass "Demotion is documented in harness token optimization doc"
+      else
+        fail "Demotion should be documented in harness token optimization doc"
+      fi
+
+      cat > "$fixture_dir/PROJECT-AGENTIC-INIT.md" <<'EOF'
+# PROJECT-AGENTIC-INIT
+
+## 1. Project Overview
+
+- **Project Name:** Fixture
+- **Short Description:** Fixture repo for harness compiler checks.
+- **Customer Type / Context:** Test fixture
+
+## 2. Tech Stack
+
+- **Framework / Runtime:** Node.js
+- **Frontend / Backend:** none
+- **Database / ORM:** none
+- **Testing:** npm
+- **Deployment Target:** local
+
+## 3. Important Commands
+
+```bash
+eslint src/**/*.{ts,tsx} *.css
+node --check app/[slug]/page.tsx
+npm run test
+```
+
+### Cheap Post-Edit Checks
+
+```bash
+eslint src/**/*.{ts,tsx} *.css
+node --check app/[slug]/page.tsx
+```
+
+### Hard Stop Gates
+
+```bash
+npm run test
+```
+
+## 4. Hard Boundaries / Guardrails
+
+- Files or paths that must never be edited automatically:
+  - .env
+- Secrets / environment files:
+  - .env
+- Deployment / production commands that always require human approval:
+  - git push
+- Database / migration rules:
+  - none
+
+## 5. High-Risk Surfaces
+
+- Auth: none
+- Routing: none
+- Payments / orders: none
+- Customer or personal data: none
+- External APIs / SSO / sync: none
+- Other critical flows: none
+
+## 6. Architecture Rules
+
+- existing patterns the agent should respect:
+  - keep hooks lightweight
+- preferred structure:
+  - keep explicit globs automatic
+- things the agent should not introduce:
+  - broad automatic hook checks
+
+## 7. Language and Copy Rules
+
+- Default language: English
+- Tone / Copy direction: concise
+- i18n specifics: none
+
+## 8. Desired Skills
+
+- Verify Skill: yes
+- Deploy Skill: yes
+- Surface Skill: no
+- Contract Skill: yes
+
+## 9. Desired Output
+
+- `AGENTS.md`
+- `.github/copilot-instructions.md`
+- `.agentic/harness.json`
+- `docs/harness-token-optimization.md`
+
+## 10. Hook Preferences
+
+- PreToolUse protection: yes
+- PostToolUse checks: yes
+- Stop gate with build/test/lint: yes
+EOF
+
+      if node bin/apply-project-agentic-init.mjs "$fixture_dir" >/dev/null 2>&1; then
+        if node - "$fixture_dir" <<'NODE' >/dev/null 2>&1
+const fs = require('node:fs');
+const path = require('node:path');
+const dir = process.argv[2];
+const harness = JSON.parse(fs.readFileSync(path.join(dir, '.agentic/harness.json'), 'utf8'));
+const commands = harness.postEditCommands || [];
+const patterns = harness.postEditRules?.[0]?.patterns || [];
+if (!commands.includes('eslint src/**/*.{ts,tsx} *.css')) process.exit(1);
+if (!commands.includes('node --check app/[slug]/page.tsx')) process.exit(2);
+if (!patterns.includes('src/**/*.ts')) process.exit(3);
+if (!patterns.includes('src/**/*.tsx')) process.exit(4);
+if (!patterns.includes('*.css')) process.exit(5);
+if (!patterns.includes('app/[slug]/page.tsx')) process.exit(6);
+if ((harness.demotedPostEditCommands || []).includes('eslint src/**/*.{ts,tsx} *.css')) process.exit(7);
+if ((harness.demotedPostEditCommands || []).includes('node --check app/[slug]/page.tsx')) process.exit(8);
+process.exit(0);
+NODE
+        then
+          pass "Explicit globs and literal bracketed paths stay in the automatic fast lane"
+        else
+          status=$?
+          if [[ "$status" -eq 1 ]]; then
+            fail "Explicit glob-based post-edit command should stay automatic"
+          elif [[ "$status" -eq 2 ]]; then
+            fail "Literal bracketed file path should stay automatic"
+          elif [[ "$status" -eq 3 ]]; then
+            fail "Brace glob should expand to src/**/*.ts"
+          elif [[ "$status" -eq 4 ]]; then
+            fail "Brace glob should expand to src/**/*.tsx"
+          elif [[ "$status" -eq 5 ]]; then
+            fail "Root glob should remain trackable as *.css"
+          elif [[ "$status" -eq 6 ]]; then
+            fail "Literal bracketed file path should stay trackable"
+          elif [[ "$status" -eq 7 ]]; then
+            fail "Explicit tracked globs should not be demoted"
+          elif [[ "$status" -eq 8 ]]; then
+            fail "Literal bracketed file path should not be demoted"
+          else
+            fail "Unexpected failure while checking explicit path/glob expansion"
+          fi
+        fi
+
+        if node - "$fixture_dir" <<'NODE' >/dev/null 2>&1
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const dir = process.argv[2];
+(async () => {
+  const mod = await import(pathToFileURL(path.join(dir, '.agentic/hooks/harness-lib.mjs')).href);
+  if (!mod.matchesPathPattern('src/foo.ts', 'src/**/*.ts')) process.exit(1);
+  if (!mod.matchesPathPattern('src/nested/foo.ts', 'src/**/*.ts')) process.exit(2);
+})().catch(() => process.exit(3));
+NODE
+        then
+          pass "Matcher treats **/ as zero or more directories"
+        else
+          status=$?
+          if [[ "$status" -eq 1 ]]; then
+            fail "Matcher should allow src/**/*.ts to match src/foo.ts"
+          elif [[ "$status" -eq 2 ]]; then
+            fail "Matcher should allow src/**/*.ts to match nested files"
+          else
+            fail "Unexpected failure while checking **/ matcher semantics"
+          fi
+        fi
+
+        if [[ -f "$fixture_dir/.github/hooks/post-edit-check.json" ]]; then
+          pass "Explicit tracked globs wire an automatic post-edit hook"
+        else
+          fail "Explicit tracked globs should wire an automatic post-edit hook"
+        fi
+
+        if [[ -f "$fixture_dir/.github/hooks/stop-verify.json" ]]; then
+          pass "Explicit tracked globs wire an automatic stop hook"
+        else
+          fail "Explicit tracked globs should wire an automatic stop hook"
+        fi
+
+        cat > "$fixture_dir/PROJECT-AGENTIC-INIT.md" <<'EOF'
+# PROJECT-AGENTIC-INIT
+
+## 1. Project Overview
+
+- **Project Name:** Fixture
+- **Short Description:** Fixture repo for harness compiler checks.
+- **Customer Type / Context:** Test fixture
+
+## 2. Tech Stack
+
+- **Framework / Runtime:** Node.js
+- **Frontend / Backend:** none
+- **Database / ORM:** none
+- **Testing:** npm
+- **Deployment Target:** local
+
+## 3. Important Commands
+
+```bash
+eslint app/[slug]/*.tsx *.css
+npm run test
+```
+
+### Cheap Post-Edit Checks
+
+```bash
+eslint app/[slug]/*.tsx *.css
+```
+
+### Hard Stop Gates
+
+```bash
+npm run test
+```
+
+## 4. Hard Boundaries / Guardrails
+
+- Files or paths that must never be edited automatically:
+  - .env
+- Secrets / environment files:
+  - .env
+- Deployment / production commands that always require human approval:
+  - git push
+- Database / migration rules:
+  - none
+
+## 5. High-Risk Surfaces
+
+- Auth: none
+- Routing: none
+- Payments / orders: none
+- Customer or personal data: none
+- External APIs / SSO / sync: none
+- Other critical flows: none
+
+## 6. Architecture Rules
+
+- existing patterns the agent should respect:
+  - keep hooks lightweight
+- preferred structure:
+  - demote unsupported glob syntax
+- things the agent should not introduce:
+  - broad automatic hook checks
+
+## 7. Language and Copy Rules
+
+- Default language: English
+- Tone / Copy direction: concise
+- i18n specifics: none
+
+## 8. Desired Skills
+
+- Verify Skill: yes
+- Deploy Skill: yes
+- Surface Skill: no
+- Contract Skill: yes
+
+## 9. Desired Output
+
+- `AGENTS.md`
+- `.github/copilot-instructions.md`
+- `.agentic/harness.json`
+- `docs/harness-token-optimization.md`
+
+## 10. Hook Preferences
+
+- PreToolUse protection: yes
+- PostToolUse checks: yes
+- Stop gate with build/test/lint: yes
+EOF
+
+        if node bin/apply-project-agentic-init.mjs "$fixture_dir" >/dev/null 2>&1; then
+          if node - "$fixture_dir" <<'NODE' >/dev/null 2>&1
+const fs = require('node:fs');
+const path = require('node:path');
+const dir = process.argv[2];
+const harness = JSON.parse(fs.readFileSync(path.join(dir, '.agentic/harness.json'), 'utf8'));
+if ((harness.postEditCommands || []).includes('eslint app/[slug]/*.tsx *.css')) process.exit(1);
+if (!(harness.fullCheckCommands || []).includes('eslint app/[slug]/*.tsx *.css')) process.exit(2);
+if (!(harness.demotedPostEditCommands || []).includes('eslint app/[slug]/*.tsx *.css')) process.exit(3);
+process.exit(0);
+NODE
+          then
+            pass "Unsupported bracket-glob commands are demoted as a whole"
+          else
+            status=$?
+            if [[ "$status" -eq 1 ]]; then
+              fail "Unsupported bracket-glob command should not stay automatic"
+            elif [[ "$status" -eq 2 ]]; then
+              fail "Unsupported bracket-glob command should move into full checks"
+            elif [[ "$status" -eq 3 ]]; then
+              fail "Unsupported bracket-glob command should be recorded as demoted"
+            else
+              fail "Unexpected failure while checking unsupported bracket-glob demotion"
+            fi
+          fi
+
+          if [[ ! -f "$fixture_dir/.github/hooks/post-edit-check.json" ]]; then
+            pass "Unsupported bracket-glob commands remove the automatic post-edit hook"
+          else
+            fail "Unsupported bracket-glob commands should not wire an automatic post-edit hook"
+          fi
+
+          if [[ ! -f "$fixture_dir/.github/hooks/stop-verify.json" ]]; then
+            pass "Unsupported bracket-glob commands remove the automatic stop hook"
+          else
+            fail "Unsupported bracket-glob commands should not wire an automatic stop hook"
+          fi
+        else
+          fail "apply-project-agentic-init unsupported bracket-glob fixture run failed"
+        fi
+      else
+        fail "apply-project-agentic-init glob fixture run failed"
+      fi
+    else
+      fail "apply-project-agentic-init fixture run failed"
+    fi
+  else
+    fail "agentic-project-init fixture bootstrap failed"
+  fi
+
+  if [[ -d "$fixture_dir" ]]; then
+    rm -r "$fixture_dir" 2>/dev/null || true
+  fi
+fi
+
 echo
 echo "Summary: ${PASS_COUNT} pass, ${WARN_COUNT} warn, ${FAIL_COUNT} fail"
 
